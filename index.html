@@ -1,0 +1,296 @@
+<!-- 此文件包含AI辅助生成的代码。 -->
+<!-- This file contains AI-assisted code generation. -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<script src="./js/online/three.min.js"></script>
+	<script src="./js/online/OrbitControls.js"></script>
+	<script src="./js/online/jszip.min.js"></script>
+    <meta charset="UTF-8">
+    <title>Edge 关卡xml编辑器3D 1.6.7</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="./misc/favicon.png">
+    <link rel="apple-touch-icon" href="./misc/favicon.png">
+    <link rel="alt-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='10 0 100 90'%3E%3Ctext y='.9em' font-size='90'%3E🧊%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="./misc/edgelxestyle.css" type="text/css">
+</head>
+<body>
+
+    <div class="toolbar" id="toolbar">
+        <div class="level-props" id="levelPropsArea">
+            <label>ID <input type="text" id="levelId" value="10001" style="width:60px;"></label>
+            <label>Name <input type="text" id="levelName" value="MyLevel" style="max-width:80px;"></label>
+            <label>Time <input type="text" id="levelTime" value="9,25,55,85,145" style="max-width:80px;" title="5个递增数字，逗号分隔"></label>
+            <label>Size <input type="number" id="sizeW" value="10" min="1" max="6000" style="width:40px;">x<input type="number" id="sizeL" value="10" min="1" max="6000" style="width:40px;">x<input type="number" id="sizeH" value="3" min="1" max="1000" style="width:40px;"></label>
+            <label>Spawn <input type="text" id="spawnPoint" value="3,5,1" style="max-width:70px;" title="X,Y,Z (0基)"></label>
+            <label>Exit <input type="text" id="exitPoint" value="7,5,1" style="max-width:70px;" title="X,Y,Z (0基)"></label>
+            <label>Theme <input type="number" id="levelTheme" value="0" min="0" max="3" style="width:40px;"></label>
+            <label>MusicJava <input type="number" id="musicJava" value="0" min="0" max="11" style="width:40px;"></label>
+            <label>Music <input type="number" id="music" value="6" min="0" max="24" style="width:40px;"></label>
+            <label>Zoom <input type="number" id="levelZoom" value="-1" min="-1" max="6" style="width:40px;"></label>
+						<label style="font-size:12px;color:#6a8aaa;margin-left:4px;"><input type="checkbox" id="levelUseAngle"></label>
+            <label>Angle <input type="number" id="levelAngle" value="22" min="-184" max="184" style="width:40px;"></label>
+            <label>FOV <input type="number" id="levelFov" value="22" min="0" max="184" style="width:40px;"></label>
+            <label>ModelTheme <input type="number" id="modelTheme" value="0" min="0" style="width:40px;"></label>
+            <button id="applyLevelBtn">应用</button>
+			<button id="newProjectBtn">新建项目</button>
+			<div class="sep"></div>
+			<label style="font-size:12px;color:#6a8aaa;">
+				<input type="checkbox" id="useShareDownload"> 手机下载
+			</label>
+			<button id="loadXmlBtn">加载XML+PNG</button>
+			<input type="file" id="fileXmlInput" accept=".xml,.png,.zip" multiple style="display:none;">
+			<button id="exportPngBtn">导出PNG</button>
+			<button id="exportXmlBtn">导出XML</button>
+			<button id="exportZipBtn">导出ZIP</button>
+			<button id="compileBtn">📦 编译</button>
+			<div class="sep"></div>
+			<button id="helpBtn">帮助</button>
+			<a href="./misc/levelgen.html">关卡生成器</a>
+			<a href="./misc/profedit.html" type="text/html">移动版存档编辑器</a>
+        </div>
+		<button id="toggleLevelPropsBtn" title="折叠/展开 Level 属性" style="min-width:auto;">▲</button>
+		<span style="display:flex; align-items:center; gap:4px; color:#aaa;">
+			层
+			<button id="layerDecreaseBtn" style="padding:2px 8px; font-size:14px; line-height:1;" title="上一层">−</button>
+			<label for="layerSelect" style="display:none;">层</label>
+			<input type="number" id="layerSelect" value="0" min="0" max="9" style="width:60px;">
+			<button id="layerIncreaseBtn" style="padding:2px 8px; font-size:14px; line-height:1;" title="下一层">+</button>
+		</span>
+        <div class="sep"></div>
+        <span style="font-size:12px;color:#6a8aaa;">工具:</span>
+        <button id="toolStatic" class="active">静态方块</button>
+        <button id="toolMoving">移动方块</button>
+        <button id="toolFalling">掉落方块</button>
+        <button id="toolPrism">棱柱</button>
+        <button id="toolResizerGrow">放大器</button>
+        <button id="toolResizerShrink">缩小器</button>
+        <button id="toolBumper">撞击器</button>
+        <button id="toolCheckpoint">存档点</button>
+        <button id="toolCameraTrigger">相机触发器</button>
+        <button id="toolButton">按钮</button>
+		<div style="padding:4px 0;"><button class="add-btn" onclick="addButtonSequence()">创建按钮序列</button></div>
+		<button id="toolSeqButton">序列子按钮</button>
+        <button id="toolOtherCube">提示方块</button>
+        <button id="toolDarkCube">黑暗方块</button>
+        <button id="toolEraser">橡皮擦</button>
+		<button id="clearLayerBtn">清空层</button>
+		<div class="sep"></div>
+        <span style="font-size:12px;color:#6a8aaa;">模式:</span>
+        <button id="toolSingle" class="active">单点</button>
+        <button id="toolBrush">画笔</button>
+        <span style="font-size:12px;color:#6a8aaa;">颜色:</span>
+        <input type="color" id="staticColorPicker" value="#ffff80" style="width:30px;height:28px;padding:2px;border-radius:4px;background:transparent;border:1px solid #2a3a5a;cursor:pointer;">
+
+        <div class="sep"></div>
+		<button id="toggle3dBtn">🧊 3D编辑</button>
+		<label for="width3dSlider" style="font-size:12px;color:#6a8aaa;">3D宽度</label>
+		<input type="range" id="width3dSlider" min="5" max="95" value="40" step="1" style="width:80px;accent-color:#4fc3f7;">
+		<input type="number" id="width3dNumber" min="5" max="95" value="40" style="width:50px;background:#0f3460;border:1px solid #1a4a7a;color:#eee;padding:2px 6px;border-radius:4px;text-align:center;">
+		<span style="font-size:12px;color:#6a8aaa;">%</span>
+		<div class="sep"></div>
+		<label style="font-size:12px;color:#6a8aaa;">
+			<input type="checkbox" id="autoNameCheck" checked> 自动命名
+		</label>
+		<label style="font-size:12px;color:#6a8aaa;">
+			<input type="checkbox" id="keepPrevProps"> 保留上次属性
+		</label>
+		<div id="unifiedMovementContainer" style="display:flex; align-items:center; gap:8px; margin:4px 0; padding:4px 8px; background:#0a1a2a; border-radius:4px;">
+			<label style="color:#8ab4f8;">
+				<input type="checkbox" id="unifiedMovementCheck"> 统一运动
+			</label>
+			<select id="unifiedBaseSelect" disabled style="flex:1; background:#0f3460; color:#eee; border:1px solid #1a4a7a; border-radius:3px; padding:2px 4px;">
+				<option value="">— 选择基准移动平台 —</option>
+			</select>
+		</div>
+        <div class="sep"></div>
+        <button id="undoBtn" title="撤销 (Ctrl+Z)">↶ 撤销</button>
+        <button id="redoBtn" title="重做 (Ctrl+Y)">↷ 重做</button>
+    </div>
+
+    <div class="main-area">
+        <div class="canvas-wrapper" id="canvasWrapper">
+            <div class="zoom-bar" id="zoomBar">
+                <span>缩放</span>
+                <input type="range" id="zoomSlider" min="10" max="500" value="65" step="5">
+                <input type="number" id="zoomNumber" min="10" value="65" step="5">
+                <span>%</span>
+            </div>
+			<div class="canvas-wrap" id="canvasWrap">
+				<div class="grid-info" id="gridInfo">Z=0 | 10×10</div>
+				<div id="gridWrapper" style="display:flex; justify-content:flex-start; align-items:flex-start; flex-shrink:0; position:relative; overflow:visible; width:auto; height:auto;">
+					<div id="pixelGrid"></div>
+				</div>
+			</div>
+		</div>
+		
+		<!-- 分隔条（拖拽手柄） -->
+		<div class="split-handle" id="splitHandle" style="flex:0 0 4px; background: #2a3a5a; cursor: col-resize; position: relative; z-index: 10; display: none;"></div>
+		
+		<!-- 3D视图容器（并排） -->
+		<div class="view3d-container" id="view3dContainer">
+			<div class="three-controls" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; background:rgba(13,13,31,0.8); padding:4px 12px; border-radius:6px;">
+				<span style="color:#6a8aaa; font-size:11px;" id="3dViewMode">模式选择</span>
+				<div style="display:flex; gap:2px;">
+					<button id="modePreview" class="mode-btn active" style="padding:2px 8px; font-size:11px;">预览</button>
+					<button id="modeSelect" class="mode-btn" style="padding:2px 8px; font-size:11px;">选择</button>
+					<button id="modeEdit" class="mode-btn" style="padding:2px 8px; font-size:11px;">编辑</button>
+				</div>
+				<span style="color:#6a8aaa; font-size:11px;" id="modeHint">鼠标拖拽</span>
+				<!-- 原有的视图按钮和缩放输入可保留，但为了整洁，将它们移到同一行 -->
+				<button class="view-btn" id="viewFrontBtn" style="padding:2px 8px; font-size:11px;">正</button>
+				<button class="view-btn" id="viewTopBtn" style="padding:2px 8px; font-size:11px;">俯</button>
+				<button class="view-btn" id="viewSideBtn" style="padding:2px 8px; font-size:11px;">侧</button>
+				<label style="color:#aaa;font-size:11px;display:flex;align-items:center;gap:4px;">
+					缩放 <input type="number" id="cameraDistInput" value="15" min="0.1" step="0.1" style="width:55px;background:#0f3460;border:1px solid #1a4a7a;color:#eee;padding:1px 4px;border-radius:4px;text-align:center;font-size:11px;">
+				</label>
+			</div>
+			<!-- 关闭按钮（右上角） -->
+			<button class="close-3d" id="close3dBtn">✕ 关闭</button>
+			<button class="reset-camera-btn" id="resetCameraBtn">⟲ 重置视角</button>
+			<div id="threeContainer"></div>
+			<div class="three-info">鼠标拖动旋转 | 滚轮缩放</div>
+			
+		</div>
+		
+        <div class="panel" id="panel">
+            <h3>属性面板</h3>
+            <div class="panel-content-area" id="panelContent">
+                <div class="empty-msg">点击画布上的元素查看属性</div>
+            </div>
+            <div class="elem-list-area">
+                <h3 style="font-size:13px;color:#8ab4f8;border-bottom:none;margin:0 0 4px 0;">元素列表
+					<label for="elemFilterSelect" style="color:#aaa;font-size:12px;align-items:center;gap:4px;">筛选：</label>
+					<select id="elemFilterSelect">
+						<option value="all">全部</option>
+						<option value="moving">移动平台</option>
+						<option value="falling">掉落平台</option>
+						<option value="prism">棱柱</option>
+						<option value="resizer">尺寸调整器</option>
+						<option value="bumper">撞击器</option>
+						<option value="checkpoint">存档点</option>
+						<option value="cameratrigger">相机触发</option>
+						<option value="button">按钮</option>
+						<option value="buttonsequence">按钮序列</option>
+						<option value="othercube">提示方块</option>
+						<option value="darkcube">黑暗方块</option>
+					</select>
+				</h3>
+                <div id="elemListContainer" class="elem-list">
+                    <div style="color:#5a7a9a;font-size:12px;padding:4px;">暂无元素</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <span>坐标: <span id="mouseCoord" class="coord-display">( -, - )</span></span>
+        <span id="statusRight">静态: 0 | 移动: 0 | 掉落: 0 | 棱柱: 0 | 放大: 0 | 缩小: 0 | 撞击: 0 | 存档: 0 | 相机: 0 | 按钮: 0 | 提示: 0 | 黑暗: 0 | 按钮序列: 0</span>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <div class="select-dialog" id="selectDialog" style="display:none;">
+        <div class="dialog-box">
+            <h4>选择元素</h4>
+            <div id="dialogOptions"></div>
+            <button class="cancel-btn" onclick="closeSelectDialog()">取消</button>
+        </div>
+		
+    </div>
+        <div class="module-area" id="visibilityArea">
+
+            <div id="visibilityCheckboxes" style="display:flex;flex-wrap:wrap;gap:6px;font-size:12px;">显示控制：
+		</div>
+    </div>
+
+
+    <!-- 帮助侧栏遮罩 -->
+    <div class="help-overlay" id="helpOverlay"></div>
+    <!-- 帮助侧栏 -->
+    <div class="help-sidebar" id="helpSidebar">
+        <div class="help-header">
+            <h2>📖 帮助文档</h2>
+            <button class="close-btn" id="helpCloseBtn">关闭</button>
+        </div>
+        <div class="help-body" id="helpBody">
+            <!-- 内容由 JavaScript 填充 -->
+        </div>
+    </div>
+	<!-- 编译对话框 -->
+	<div id="compileDialog" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:3000; justify-content:center; align-items:center;">
+		<div style="background:#16213e; border:2px solid #4fc3f7; border-radius:8px; padding:24px; max-width:600px; width:90%; max-height:90vh; overflow-y:auto; color:#eee; position:relative;">
+			
+			<!-- ===== 标题栏（包含关闭按钮在右上角） ===== -->
+			<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid #2a3a5a; padding-bottom:10px;">
+				<h3 style="margin:0; color:#8ab4f8;">📦 编译关卡</h3>
+				<button id="closeCompileDialogBtn" style="background:#a03030; border:1px solid #a03030; color:#fff; padding:4px 14px; border-radius:4px; cursor:pointer; font-size:14px; flex-shrink:0;">✕ 关闭</button>
+			</div>
+			<div style="margin-bottom:12px;">
+				<label>主题：
+					<select id="compileTheme">
+						<option value="0">0 (白色)</option>
+						<option value="1">1 (浅灰)</option>
+						<option value="2">2 (深灰)</option>
+						<option value="3" selected>3 (黑色)</option>
+					</select>
+					<input type="checkbox" id="compilePhoneMode"> 编译手机版（时间阈值×100）
+                    <input type="checkbox" id="compileLayeredTexture" checked>
+        原版风格模型
+				</label>
+			</div>
+			
+			<!-- XML 选择器（新增） -->
+			<div style="margin-bottom:12px;">
+				<label for="compileXmlInput">选择 XML / ZIP 文件：</label>
+				<button id="clearXmlBtn" class="cancel-btn" style="padding:2px 8px;">清除XML / ZIP</button>
+				<input type="file" id="compileXmlInput" accept=".xml,.zip" style="display:block; margin-top:4px; background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:4px; border-radius:4px; width:100%;">
+			</div>
+
+			<div style="margin-bottom:12px;">
+				<label for="compilePngInput">选择 PNG 层文件（可多选）：</label>
+				<button id="clearPngBtn" class="cancel-btn" style="padding:2px 8px;">清除PNG</button>
+				<input type="file" id="compilePngInput" accept=".png" multiple style="display:block; margin-top:4px; background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:4px; border-radius:4px; width:100%;">
+			</div>
+			<div style="margin-top:8px;">
+				<button id="clearAllBtn" class="cancel-btn" style="padding:4px 12px;">清除全部</button>
+			</div>
+			<div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+				<button id="compileCurrentBtn" style="background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">📥 导入当前关卡</button>
+				<button id="compileImportBtn" style="background:#2a5a7a; border:1px solid #4a8aba; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">📂 编译</button>
+			</div>
+			
+			<!-- 反编译区域 -->
+			<div style="margin-top:16px; border-top:1px solid #2a3a5a; padding-top:12px;">
+				<h4 style="color:#8ab4f8; margin:0 0 8px 0;">🔄 反编译 BIN</h4>
+				<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+					<button id="decompileSelectBtn" style="background:#2a5a7a; border:1px solid #4a8aba; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">📂 选择 BIN 文件</button>
+					<input type="file" id="decompileBinInput" accept=".bin" style="display:none;">
+					<button id="decompileActionBtn" style="background:#2a5a7a; border:1px solid #4a8aba; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">⚙️ 反编译</button>
+					<button id="clearDecompileBtn" style="background:#a03030; border:1px solid #a03030; color:#fff; padding:4px 12px; border-radius:4px; cursor:pointer;">🗑️ 清除文件</button>
+					<span style="color:#6a8aaa; font-size:12px;">选择 .bin 文件，然后点击反编译</span>
+                    <label  for="decompileStaticMovingToPng"style="font-size:12px;color:#aaa;margin-left:8px;">
+                    <input type="checkbox" id="decompileStaticMovingToPng">
+                    静止移动方块写入 PNG（不输出到 XML）
+                </label>
+				</div>
+				<div id="decompileDownloadArea" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;"></div>
+			</div>
+			
+			<div id="compileLog" style="background:#0a0a10; border:1px solid #2a3a5a; border-radius:4px; padding:8px; max-height:200px; overflow-y:auto; font-family:monospace; font-size:12px; white-space:pre-wrap; word-break:break-all; margin-bottom:12px;"></div>
+			<div id="compileDownloadArea" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+		</div>
+	</div>
+</body>
+	<!-- 顺序不能随便改 -->
+	<script src="./js/edgelxe_utils.js"></script>
+	<script src="./js/edgelxe_cache.js"></script>
+	<script src="./js/edgelxe_render2d.js"></script>
+	<script src="./js/edgelxe_panel.js"></script>
+	<script src="./js/edgelxe_file.js"></script>
+	<script src="./js/edgelxe_3d.js"></script>
+    <script src="./js/edgelxe_quickfill.js"></script>
+	<script src="./js/edgelevelcompiler.js"></script>
+	<script src="./js/edgelxe_elem.js"></script>
+	<script src="./js/edgelxe_misc.js"></script>
+	<script src="./js/edgelxe_init.js"></script>
+</html><!-- 15.5 -->

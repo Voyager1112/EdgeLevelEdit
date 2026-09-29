@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EDGE 手机版存档 (option8) 编辑器</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    margin: 0;
+    background: #f5f5f7;
+    color: #333;
+    font-size: 14px;
+  }
+  header {
+    background: #2c3e50;
+    color: white;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 500; }
+  header button {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #3498db;
+    color: white;
+    font-size: 13px;
+  }
+  header button:hover { background: #2980b9; }
+  header button:disabled { background: #7f8c8d; cursor: not-allowed; }
+  header button.secondary { background: #7f8c8d; }
+  header button.secondary:hover:not(:disabled) { background: #95a5a6; }
+  #filename { font-size: 13px; opacity: 0.85; margin-left: auto; }
+
+  .container { padding: 15px; max-width: 1100px; margin: 0 auto; }
+
+  #info {
+    padding: 10px 14px;
+    background: #ecf0f1;
+    border-radius: 4px;
+    font-size: 13px;
+    margin-bottom: 12px;
+    color: #555;
+  }
+
+  #drop-zone {
+    border: 2px dashed #bdc3c7;
+    border-radius: 8px;
+    padding: 50px 20px;
+    text-align: center;
+    color: #7f8c8d;
+    cursor: pointer;
+    background: white;
+    transition: all 0.2s;
+    font-size: 14px;
+  }
+  #drop-zone:hover, #drop-zone.dragover {
+    border-color: #3498db;
+    background: #f0f7ff;
+    color: #2980b9;
+  }
+
+  #table-container {
+    display: none;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    font-size: 13px;
+  }
+  thead th {
+    background: #34495e;
+    color: white;
+    padding: 10px 6px;
+    text-align: center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    font-weight: 500;
+    font-size: 12px;
+  }
+  tbody td {
+    padding: 3px 6px;
+    text-align: center;
+    border-bottom: 1px solid #ecf0f1;
+  }
+  tbody tr:nth-child(even) td { background: #fafbfc; }
+  tbody tr:hover td { background: #f0f7ff; }
+  td.name-cell {
+    text-align: left;
+    padding-left: 12px;
+    color: #2c3e50;
+    font-weight: 500;
+  }
+
+  td input, td select {
+    width: 100%;
+    padding: 5px 6px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 13px;
+    text-align: center;
+    background: transparent;
+    font-family: inherit;
+  }
+  td input:hover, td select:hover { border-color: #dfe6e9; }
+  td input:focus, td select:focus {
+    outline: none;
+    border-color: #3498db;
+    background: white;
+    box-shadow: 0 0 0 2px rgba(52,152,219,0.2);
+  }
+  td.name-cell { padding-left: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>EDGE 手机版存档 (option8) 编辑器</h1>
+  <button id="btn-open">打开存档</button>
+  <button id="btn-save" class="secondary" disabled>保存（下载）</button>
+  <input type="file" id="file-input" style="display:none">
+  <span id="filename">未加载文件</span>
+</header>
+
+<div class="container">
+  <div id="info">拖放存档文件到下方区域，或点击“打开存档”</div>
+  <div id="drop-zone">
+    将 option8 存档拖到这里，或点击上方按钮选择文件
+  </div>
+  <div id="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:80px">关卡 ID</th>
+          <th style="width:230px">关卡名</th>
+          <th style="width:150px">时间 (分:秒.厘秒)</th>
+          <th style="width:110px">帧 (1/22秒)</th>
+          <th style="width:80px">Prism</th>
+          <th style="width:80px">评级</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const HEADER_SIZE = 37;
+const RECORD_SIZE = 16;
+const TIME_PER_SEC = 22;
+const RANK_NAMES = ['D', 'C', 'B', 'A', 'S', 'S+'];
+
+const LEVEL_NAMES = {
+  309: "1st_contact", 300: "training", 310: "playground", 36: "pushing_stars",
+  201: "bump", 37: "city_rythm", 311: "speedrun", 38: "milky_way",
+  59: "8bit", 301: "metro", 40: "mini_me", 43: "vertex",
+  206: "equalizer", 312: "peripherique", 44: "time_machine", 42: "mind_the_gap",
+  315: "edge_code", 45: "edge_time", 46: "chase", 60: "landing",
+  307: "chess", 48: "switch_keep", 202: "mecanic", 305: "higher",
+  41: "squadron", 303: "metronome", 49: "orion", 302: "try_again",
+  204: "hypnozone", 304: "beat", 52: "star_castle", 308: "sticker",
+  50: "sync_the_wall", 306: "snap", 51: "braintonic", 313: "2nd_contact",
+  47: "jungle_fever", 314: "speedrun_2", 53: "edge_master", 54: "cube_invaders",
+  317: "starfield", 319: "bonus", 318: "extra_cube", 222: "sliced",
+  221: "earthquake", 220: "vertigo", 400: "push_me", 401: "perfect_cell",
+  815: "hangout", 810: "hammer", 805: "compost", 817: "babylonian",
+  801: "swirl", 806: "density", 811: "magic", 808: "cubism",
+  813: "mystic", 804: "indiana", 816: "chunk", 812: "goliath",
+  818: "404", 802: "gears", 800: "fireworks", 820: "winners", 850: "zias",
+  535: "ex_01_first_step", 536: "ex_02_climbing", 537: "ex_03_moving_walls",
+  538: "ex_04_click", 539: "ex_05_black_robot", 541: "ex_06_dark_cube",
+  500: "ex_07_roots", 548: "ex_08_flick", 540: "ex_09_lying_bridge",
+  556: "minicube", 511: "ex_10_crateria", 555: "furious bot",
+  512: "ex_11_stratosphere", 557: "vertical way", 519: "ex_12_tiny_road",
+  510: "ex_13_cloudy_way", 526: "ex_14_walled_up_race",
+  508: "ex_15_sugar_ground", 558: "cargo", 546: "ex_16_dark_edge_time",
+  507: "ex_17_trench", 524: "ex_18_paper_wall", 516: "ex_19_claustrophobia",
+  553: "ex_20_electric_way", 509: "ex_21_impulse_maze", 523: "ex_22_far",
+  545: "ex_23_deadly_race", 522: "ex_24_dont_click",
+  518: "ex_25_white_spring", 533: "ex_26_hurry", 528: "ex_27_blind",
+  542: "ex_28_wire", 521: "ex_29_hyperphase", 532: "ex_30_star_factory",
+  514: "ex_31_star_dust", 531: "ex_32_destructuring", 520: "ex_33_black_hole",
+  600: "ex_34_robot_sport", 525: "ex_35_cube_fall", 517: "ex_36_galaxy_rail",
+  544: "ex_37_voodoo_dance", 530: "ex_38_highest_flag",
+  515: "ex_39_geometric_snake", 527: "ex_40_rodeo",
+  547: "ex_41_final_clash", 534: "ex_42_pushy", 551: "ex_43_arcsector",
+  550: "ex_44_timorg", 574: "crystal_mine", 570: "remember", 572: "zero",
+  560: "the_wall", 563: "rush", 564: "cubing_machine", 561: "the_wall_2",
+  567: "black_way", 568: "curious_land", 562: "the_wall_3", 575: "little_seed",
+  569: "space_noise", 571: "magic_maze", 566: "piano", 573: "star_heart"
+};
+
+// ---------- 状态 ----------
+let headerBytes = null;
+let records = [];       // {id, time_units, prism, rank, preBytes: Uint8Array}
+let tailBytes = null;
+let currentFilename = '';
+
+// ---------- 工具函数 ----------
+function formatTime(units) {
+  if (units < 0) return '0:00.00';
+  const totalCs = Math.floor(units * 100 / TIME_PER_SEC);
+  const totalSec = Math.floor(totalCs / 100);
+  const cs = totalCs % 100;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m > 0) {
+    return `${m}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+  }
+  return `${s}.${String(cs).padStart(2, '0')}`;
+}
+
+function parseTimeInput(text) {
+  text = (text || '').trim();
+  if (!text) return null;
+  try {
+    if (text.includes(':')) {
+      const idx = text.indexOf(':');
+      const m = parseInt(text.slice(0, idx));
+      const rest = text.slice(idx + 1);
+      let s, cs;
+      if (rest.includes('.')) {
+        const parts = rest.split('.');
+        s = parseInt(parts[0]);
+        cs = parseInt((parts[1] + '00').slice(0, 2));
+      } else {
+        s = parseInt(rest);
+        cs = 0;
+      }
+      if (isNaN(m) || isNaN(s) || isNaN(cs)) return null;
+      return m * 60 + s + cs / 100;
+    } else {
+      const v = parseFloat(text);
+      return isNaN(v) ? null : v;
+    }
+  } catch (e) {
+    return null;
+  }
+}
+
+// ---------- 解析 ----------
+function tryParseRecord(data, pos) {
+  if (pos + RECORD_SIZE > data.length) return null;
+  const view = new DataView(data.buffer, data.byteOffset + pos, RECORD_SIZE);
+  const id = view.getUint32(0, true);
+  const timeUnits = view.getUint32(4, true);
+  const prism = view.getUint32(8, true);
+  const rank = view.getUint32(12, true);
+
+  // 严格模式：只接受在关卡名映射中的 ID，避免把设置块的字节误认为记录
+  //if (!LEVEL_NAMES[id]) return null;
+  if (rank > 5) return null;
+  if (prism > 1000) return null;
+  if (timeUnits > 22 * 3600) return null;
+
+  return { id, time_units: timeUnits, prism, rank };
+}
+
+function parse(data) {
+  if (data.length < HEADER_SIZE) throw new Error('文件太小，不是有效的存档');
+  headerBytes = data.slice(0, HEADER_SIZE);
+  records = [];
+
+  let pos = HEADER_SIZE;
+  let gapStart = pos;
+
+  while (pos + RECORD_SIZE <= data.length) {
+    const rec = tryParseRecord(data, pos);
+    if (rec) {
+      rec.preBytes = data.slice(gapStart, pos);
+      records.push(rec);
+      pos += RECORD_SIZE;
+      gapStart = pos;
+      continue;
+    }
+    // 尝试跳过 1~24 字节
+    let recovered = false;
+    for (let skip = 1; skip <= 24; skip++) {
+      if (pos + skip + RECORD_SIZE > data.length) break;
+      if (tryParseRecord(data, pos + skip)) {
+        pos += skip;
+        recovered = true;
+        break;
+      }
+    }
+    if (!recovered) break;
+  }
+
+  tailBytes = data.slice(gapStart);
+  return { recordCount: records.length, tailSize: tailBytes.length };
+}
+
+// ---------- 渲染 ----------
+function makeInput(type, value) {
+  const inp = document.createElement('input');
+  inp.type = type;
+  inp.value = value;
+  return inp;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+
+  records.forEach(rec => {
+    const tr = document.createElement('tr');
+
+    // 关卡 ID
+    const idInput = makeInput('number', rec.id);
+    const idCell = document.createElement('td');
+    idCell.appendChild(idInput);
+    tr.appendChild(idCell);
+
+    // 关卡名
+    const nameCell = document.createElement('td');
+    nameCell.className = 'name-cell';
+    nameCell.textContent = LEVEL_NAMES[rec.id] || '未知';
+    tr.appendChild(nameCell);
+
+    // 时间
+    const timeInput = makeInput('text', formatTime(rec.time_units));
+    const timeCell = document.createElement('td');
+    timeCell.appendChild(timeInput);
+    tr.appendChild(timeCell);
+
+    // 帧
+    const framesInput = makeInput('number', rec.time_units);
+    const framesCell = document.createElement('td');
+    framesCell.appendChild(framesInput);
+    tr.appendChild(framesCell);
+
+    // Prism
+    const prismInput = makeInput('number', rec.prism);
+    const prismCell = document.createElement('td');
+    prismCell.appendChild(prismInput);
+    tr.appendChild(prismCell);
+
+    // 评级
+    const rankSelect = document.createElement('select');
+    RANK_NAMES.forEach((n, idx) => {
+      const opt = document.createElement('option');
+      opt.value = idx;
+      opt.textContent = n;
+      rankSelect.appendChild(opt);
+    });
+    rankSelect.value = rec.rank;
+    const rankCell = document.createElement('td');
+    rankCell.appendChild(rankSelect);
+    tr.appendChild(rankCell);
+
+    // 事件
+    idInput.addEventListener('input', () => {
+      const v = parseInt(idInput.value);
+      if (!isNaN(v) && v > 0) {
+        rec.id = v;
+        nameCell.textContent = LEVEL_NAMES[v] || '未知';
+      }
+    });
+
+    timeInput.addEventListener('change', () => {
+      const sec = parseTimeInput(timeInput.value);
+      if (sec !== null && sec >= 0) {
+        rec.time_units = Math.round(sec * TIME_PER_SEC);
+        timeInput.value = formatTime(rec.time_units);
+        framesInput.value = rec.time_units;
+      } else {
+        timeInput.value = formatTime(rec.time_units);
+      }
+    });
+
+    framesInput.addEventListener('change', () => {
+      const v = parseInt(framesInput.value);
+      if (!isNaN(v) && v >= 0) {
+        rec.time_units = v;
+        timeInput.value = formatTime(v);
+      } else {
+        framesInput.value = rec.time_units;
+      }
+    });
+
+    prismInput.addEventListener('change', () => {
+      const v = parseInt(prismInput.value);
+      if (!isNaN(v) && v >= 0) rec.prism = v;
+      else prismInput.value = rec.prism;
+    });
+
+    rankSelect.addEventListener('change', () => {
+      rec.rank = parseInt(rankSelect.value);
+    });
+
+    tbody.appendChild(tr);
+  });
+}
+
+// ---------- 构造二进制 ----------
+function buildBinary() {
+  const parts = [headerBytes];
+  for (const rec of records) {
+    if (rec.preBytes && rec.preBytes.length) parts.push(rec.preBytes);
+    const buf = new ArrayBuffer(RECORD_SIZE);
+    const dv = new DataView(buf);
+    dv.setUint32(0, rec.id, true);
+    dv.setUint32(4, rec.time_units, true);
+    dv.setUint32(8, rec.prism, true);
+    dv.setUint32(12, rec.rank, true);
+    parts.push(new Uint8Array(buf));
+  }
+  if (tailBytes) parts.push(tailBytes);
+
+  let total = 0;
+  for (const p of parts) total += p.length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) {
+    out.set(p, off);
+    off += p.length;
+  }
+  return out;
+}
+
+// ---------- 文件操作 ----------
+async function loadFile(file) {
+  const buf = await file.arrayBuffer();
+  const data = new Uint8Array(buf);
+  try {
+    const info = parse(data);
+    currentFilename = file.name;
+    document.getElementById('filename').textContent = file.name;
+    document.getElementById('info').textContent =
+      `头部 ${HEADER_SIZE} 字节 | 共 ${info.recordCount} 条记录 | 尾部 ${info.tailSize} 字节 | 没有对应关卡名也不是自定义关卡ID的数据最好不要修改`;
+    document.getElementById('drop-zone').style.display = 'none';
+    document.getElementById('table-container').style.display = 'block';
+    document.getElementById('btn-save').disabled = false;
+    renderTable();
+  } catch (e) {
+    alert('解析失败：' + e.message);
+  }
+}
+
+function saveFile() {
+  const bytes = buildBinary();
+  const blob = new Blob([bytes], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = currentFilename || 'modified.option8';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ---------- 事件绑定 ----------
+document.getElementById('btn-open').addEventListener('click', () => {
+  document.getElementById('file-input').click();
+});
+
+document.getElementById('file-input').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) loadFile(f);
+});
+
+document.getElementById('btn-save').addEventListener('click', saveFile);
+
+const dropZone = document.getElementById('drop-zone');
+dropZone.addEventListener('click', () => {
+  document.getElementById('file-input').click();
+});
+
+['dragenter', 'dragover'].forEach(evt => {
+  dropZone.addEventListener(evt, e => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+  });
+});
+
+['dragleave', 'drop'].forEach(evt => {
+  dropZone.addEventListener(evt, e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+  });
+});
+
+dropZone.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+
+// 页面全局也允许拖放
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  if (e.dataTransfer.files.length > 0) loadFile(e.dataTransfer.files[0]);
+});
+</script>
+</body>
+</html>
