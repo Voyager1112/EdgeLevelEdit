@@ -830,7 +830,7 @@ class EdgeCompiler {
 			L.appendChild(newEl);
 		}
 	}
-	
+
     // RelatedTo 递归解析
     /*resolveRelatedTo(mp, mpData, resolving) {
         if (mp._resolved) return mp._resolvedWaypoints;
@@ -916,6 +916,159 @@ class EdgeCompiler {
 		this.logInfo(`MP ${this.getAttrIgnoreCase(mp.el, 'ID') || '?'} RelatedTo="${related}" → 插入 ${targetWps.length} 个路点（含偏移）到开头`);
 		return mp._resolvedWaypoints;
 	}
+    
+    // 从两个坐标生成"曼哈顿路径"：依次 x+1、y+1、z+1，直到到达终点
+    buildManhattanPath(start, end) {
+        const path = [{ x: start.x, y: start.y, z: start.z }];
+        let cur = { x: start.x, y: start.y, z: start.z };
+        let guard = 0;
+        while ((cur.x !== end.x || cur.y !== end.y || cur.z !== end.z) && guard++ < 10000) {
+            if (cur.x !== end.x) cur = { x: cur.x + Math.sign(end.x - cur.x), y: cur.y, z: cur.z };
+            else if (cur.y !== end.y) cur = { x: cur.x, y: cur.y + Math.sign(end.y - cur.y), z: cur.z };
+            else if (cur.z !== end.z) cur = { x: cur.x, y: cur.y, z: cur.z + Math.sign(end.z - cur.z) };
+            path.push({ ...cur });
+        }
+        return path;
+    }
+
+    // 收集所有被 button / buttonsequence 通过 AffectMovingPlatforms 引用的 mp ID
+    collectReferencedMpIds(rawBtns) {
+        const set = new Set();
+        const addFrom = (el) => {
+            const attr = this.getAttrIgnoreCase(el, 'AffectMovingPlatforms', '');
+            if (!attr) return;
+            for (const item of this.parseIdList(attr)) set.add(item.id);
+        };
+        for (const b of rawBtns) {
+            addFrom(b.el);
+            if (b.seq) addFrom(b.seq);
+        }
+        return set;
+    }
+
+    // 主入口
+    applyTraceSugar(L, mpData, rawBtns) {
+        if (!mpData || mpData.length === 0) return;
+        const referenced = this.collectReferencedMpIds(rawBtns);
+
+        const originalCount = mpData.length;
+        const added = [];
+
+        for (let i = 0; i < originalCount; i++) {
+            const mp = mpData[i];
+            const el = mp.el;
+
+            const traceAttr = this.getAttrIgnoreCase(el, 'Trace', 'false');
+            if (String(traceAttr).toLowerCase() !== 'true') continue;
+
+            let tl = parseInt(this.getAttrIgnoreCase(el, 'TraceLength', '-1'), 10);
+            if (isNaN(tl)) tl = -1;
+            if (tl === 0) continue;   // tracelength = 0：不执行
+
+            const mpId = this.getAttrIgnoreCase(el, 'ID');
+            const autoStart = this.parseBool(this.getAttrIgnoreCase(el, 'AutoStart', 'True'));
+            const isReferenced = referenced.has(mpId);
+            if (!autoStart && !isReferenced) continue;   // 未触发
+
+            // tl < 0：曼哈顿路径全铺
+            if (tl < 0) {
+                const trails = this.buildTraceByLength(mp);
+                for (const t of trails) {
+                    mpData.push(t);
+                    added.push({ original: mp, trail: t });
+                }
+                if (isReferenced) this.addButtonRefsToTrails(rawBtns, mpId, trails);
+            } else {
+                // tl > 0：先不实现，占位
+                // const trails = this.buildTraceByCount(mp, tl);
+                // ...
+            }
+        }
+    }
+
+    // tracelength < 0 情形
+    buildTraceByLength(mp) {
+        const wps = mp.waypoints || [];
+        if (wps.length < 2) return [];
+
+        const start = wps[0].pos;
+        const end = wps[wps.length - 1].pos;
+        const totalT = wps[wps.length - 1].tt || 0;
+        const lastPause = wps[wps.length - 1].pt || 0;
+
+        const path = this.buildManhattanPath(start, end);
+        const d = path.length - 1;
+        if (d <= 0) return [];
+
+        const fullBlock = this.getAttrIgnoreCase(mp.el, 'FullBlock', 'True');
+        const origId = this.getAttrIgnoreCase(mp.el, 'ID') || 'M';
+
+        const trails = [];
+        for (let i = 1; i < d; i++) {
+            const trailEl = this.xml.createElement('MovingPlatform');
+            const trailId = origId + '_T' + i;
+            trailEl.setAttribute('ID', trailId);
+            trailEl.setAttribute('AutoStart', 'True');
+            trailEl.setAttribute('LoopStartIndex', '0');
+            trailEl.setAttribute('FullBlock', fullBlock);
+
+            // 累积时间：路径第 k 步的到达时间 = totalT * k / d
+            const resolvedWps = [];
+            for (let k = 0; k <= i; k++) {
+                const p = path[k];
+                const acc = totalT * k / d;
+                const prevAcc = totalT * (k - 1) / d;
+                const tt = k === 0 ? 0 : Math.round(acc - prevAcc);
+                const pt = (k === i) ? lastPause : 0;
+
+                const wpEl = this.xml.createElement('Waypoint');
+                wpEl.setAttribute('Position', `${p.x},${p.y},${p.z}`);
+                wpEl.setAttribute('TravelTime', String(tt));
+                wpEl.setAttribute('PauseTime', String(pt));
+                trailEl.appendChild(wpEl);
+
+                resolvedWps.push({ pos: { ...p }, tt, pt });
+            }
+
+            trails.push({
+                el: trailEl,
+                waypoints: resolvedWps,
+                offset: { x: 0, y: 0, z: 0 },
+                relatedTo: '',
+                _resolved: true,
+                _resolvedWaypoints: resolvedWps
+            });
+        }
+        return trails;
+    }
+
+    // 给引用了主方块的按钮/序列添加对所有尾迹方块的引用
+    addButtonRefsToTrails(rawBtns, mpId, trails) {
+        if (trails.length === 0) return;
+        const trailIds = trails.map(t => this.getAttrIgnoreCase(t.el, 'ID')).filter(Boolean);
+        if (trailIds.length === 0) return;
+
+        const augmentAffectAttr = (el) => {
+            const attr = this.getAttrIgnoreCase(el, 'AffectMovingPlatforms', '');
+            if (!attr) return;
+            const items = this.parseIdList(attr);
+            const hasMp = items.some(x => x.id === mpId);
+            if (!hasMp) return;
+            // 保留原始数据，添加 trail ids
+            const existing = new Set(items.map(x => x.id));
+            const newItems = items.slice();
+            for (const t of trailIds) {
+                if (!existing.has(t)) newItems.push({ id: t, data: 0 });
+            }
+            const newVal = newItems.map(it => it.data === 0 ? it.id : `${it.id}(${it.data})`).join(',');
+            el.setAttribute('AffectMovingPlatforms', newVal);
+        };
+
+        for (const b of rawBtns) {
+            augmentAffectAttr(b.el);
+            if (b.seq) augmentAffectAttr(b.seq);
+        }
+    }
 
 	compile() {
 		this.idMap = {};
@@ -1030,6 +1183,9 @@ class EdgeCompiler {
 		for (let i = 0; i < rawBtns.length; i++) {
 			this.regId(this.getAttrIgnoreCase(rawBtns[i].el, 'ID'), 'button', i);
 		}
+        
+        // ---- Trace 语法糖预处理 ----
+		this.applyTraceSugar(L, mpData, rawBtns);
 
 		// ---- 构建反向映射：目标 ID -> 依赖它的平台 ID 列表 ----
 		const relatedToTargetMap = {};

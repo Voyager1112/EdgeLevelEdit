@@ -864,6 +864,8 @@ B 通道（模型高度）
 	// ========== 事件委托（代替每个像素上的独立监听） ==========
 
 	canvas.addEventListener('click', function(e) {
+        // 添加模式下由 mousedown 负责，click 不再重复放
+        if (state.canvasEditMode === 'add' && state.currentTool !== 'eraser') return;
 		const rect = canvas.getBoundingClientRect();
 		const scaleX = canvas.width / rect.width;
 		const scaleY = canvas.height / rect.height;
@@ -911,18 +913,88 @@ B 通道（模型高度）
 		handlePixelClick(realX, realY, state.currentLayer, staticCoord, elemIdsStr);
 	}
 
-	// 鼠标按下：开始绘制（仅画笔模式）
-	canvas.addEventListener('mousedown', function(e) {
-		if (state.drawMode !== 'brush') return;
-		state.isDrawing = true;
-        state._brushSessionActive = true;      // ← 新增
-        state._brushSessionRecorded = false;   // ← 新增
-		_lastBrushPos = null; // 重置
-		processClickAt(e.clientX, e.clientY);
-	});
+    let _longPressTimer = null;
+    let _longPressDelayTimer = null;
+    let _longPressPos = { x: 0, y: 0 };
+    let _longPressCell = { x: NaN, y: NaN };
+
+    canvas.addEventListener('mousedown', function(e) {
+        if (state.canvasEditMode === 'add' && state.currentTool !== 'eraser') {
+            state._addSessionActive = true;
+            state._addSessionRecorded = false;
+            _longPressPos = { x: e.clientX, y: e.clientY };
+
+            // 记录起始格子
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const gx = Math.floor(((e.clientX - rect.left) * scaleX - PADDING) / PIXEL_SIZE);
+            const gy = Math.floor(((e.clientY - rect.top) * scaleY - PADDING) / PIXEL_SIZE);
+            _longPressCell = { x: currentMinX + gx, y: currentMinY + gy };
+
+            // 立即放一个
+            processClickAt(e.clientX, e.clientY);
+
+            // 启动 1 秒延时
+            clearTimeout(_longPressDelayTimer);
+            clearInterval(_longPressTimer);
+            _longPressTimer = null;
+            _longPressDelayTimer = setTimeout(() => {
+                _longPressTimer = setInterval(() => {
+                    processClickAt(_longPressPos.x, _longPressPos.y);
+                }, 400);
+            }, 1000);
+
+            return;
+        }
+
+        if (state.drawMode !== 'brush') return;
+        state.isDrawing = true;
+        state._brushSessionActive = true;
+        state._brushSessionRecorded = false;
+        _lastBrushPos = null;
+        processClickAt(e.clientX, e.clientY);
+    });
 
 	// 鼠标移动：如果正在绘制且为画笔模式，持续绘制
 	canvas.addEventListener('mousemove', function(e) {
+        // 添加模式：更新位置 + 重置 1 秒延时
+        if (state._addSessionActive) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const gx = Math.floor(((e.clientX - rect.left) * scaleX - PADDING) / PIXEL_SIZE);
+            const gy = Math.floor(((e.clientY - rect.top) * scaleY - PADDING) / PIXEL_SIZE);
+            const realX = currentMinX + gx;
+            const realY = currentMinY + gy;
+
+            if (!isNaN(realX) && !isNaN(realY)) {
+                mouseCoord.textContent = `(${realX}, ${realY}, ${state.currentLayer})`;
+            }
+
+            // 进入新格子就立即放一个（画笔行为）
+            if (realX !== _longPressCell.x || realY !== _longPressCell.y) {
+                _longPressCell = { x: realX, y: realY };
+                _longPressPos = { x: e.clientX, y: e.clientY };
+                processClickAt(e.clientX, e.clientY);
+            } else {
+                // 同格内移动只更新光标位置
+                _longPressPos = { x: e.clientX, y: e.clientY };
+            }
+
+            // 每次移动都重置 1 秒延时
+            clearTimeout(_longPressDelayTimer);
+            clearInterval(_longPressTimer);
+            _longPressTimer = null;
+            _longPressDelayTimer = setTimeout(() => {
+                _longPressTimer = setInterval(() => {
+                    processClickAt(_longPressPos.x, _longPressPos.y);
+                }, 300);
+            }, 1000);
+
+            return;
+        }
+
 		const rect = canvas.getBoundingClientRect();
 		const scaleX = canvas.width / rect.width;
 		const scaleY = canvas.height / rect.height;
@@ -953,21 +1025,41 @@ B 通道（模型高度）
 	});
 
 	// 鼠标松开：结束绘制
-	canvas.addEventListener('mouseup', function(e) {
-		state.isDrawing = false;
-        state._brushSessionActive = false;     // ← 新增
-        state._brushSessionRecorded = false;   // ← 新增
-		_lastBrushPos = null;
-	});
+    canvas.addEventListener('mouseup', function(e) {
+        // 添加模式：清掉所有计时器
+        if (state._addSessionActive) {
+            clearTimeout(_longPressDelayTimer);
+            clearInterval(_longPressTimer);
+            _longPressDelayTimer = null;
+            _longPressTimer = null;
+            state._addSessionActive = false;
+            state._addSessionRecorded = false;
+            return;
+        }
+
+        // 原有画笔逻辑
+        state.isDrawing = false;
+        state._brushSessionActive = false;
+        state._brushSessionRecorded = false;
+        _lastBrushPos = null;
+    });
 
 	// 鼠标离开画布：清除绘制状态和坐标显示
-	canvas.addEventListener('mouseleave', function() {
-		state.isDrawing = false;
-        state._brushSessionActive = false;     // ← 新增
-        state._brushSessionRecorded = false;   // ← 新增
-		_lastBrushPos = null;
-		mouseCoord.textContent = '( -, - )';
-	});
+    canvas.addEventListener('mouseleave', function() {
+        if (state._addSessionActive) {
+            clearTimeout(_longPressDelayTimer);
+            clearInterval(_longPressTimer);
+            _longPressDelayTimer = null;
+            _longPressTimer = null;
+            state._addSessionActive = false;
+            state._addSessionRecorded = false;
+        }
+        state.isDrawing = false;
+        state._brushSessionActive = false;
+        state._brushSessionRecorded = false;
+        _lastBrushPos = null;
+        mouseCoord.textContent = '( -, - )';
+    });
 
 	// 触摸事件（移动端支持）
 	canvas.addEventListener('touchstart', function(e) {
@@ -1118,6 +1210,10 @@ B 通道（模型高度）
     });
     document.getElementById('undoBtn')?.addEventListener('click', undo);
     document.getElementById('redoBtn')?.addEventListener('click', redo);
+    
+    document.getElementById('canvasAddMode').addEventListener('change', function() {
+        setCanvasEditMode(this.checked ? 'add' : 'select');
+    });
     
 	fixFormFieldAssociations(document);
 	setInteractionMode('preview');

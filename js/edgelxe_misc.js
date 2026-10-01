@@ -2073,3 +2073,11 @@ function hasProjectData() {
            state.otherCubes.length > 0 ||
            state.darkCubes.length > 0;
 }
+
+function setCanvasEditMode(mode) {
+    state.canvasEditMode = mode;
+    const cb = document.getElementById('canvasAddMode');
+    if (cb) cb.checked = (mode === 'add');
+    showToast(mode === 'select' ? '编辑模式：选择' : '编辑模式：添加');
+}
+window.setCanvasEditMode = setCanvasEditMode;

@@ -129,6 +129,7 @@ const state = {
 	highlightedMesh: null,     // 当前高亮mesh（准星对准）
 	canvasRange: { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 },
     _suppressUI: false,
+    canvasEditMode: 'select',   // 'select' | 'add'
 };
 
 // 渲染节流
@@ -178,6 +179,40 @@ const fileXmlInput = document.getElementById('fileXmlInput');
 function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
     if (state.currentTool === 'eraser') {
         handleEraserClick(x, y, z, staticCoord, elemIdsStr);
+        return;
+    }
+    
+    // ===== 添加模式：跳过所有选中逻辑，直接放置 =====
+    if (state.canvasEditMode === 'add') {
+        const toolMap = {
+            'static': () => {
+                if (x < 0 || x >= state.level.size.w ||
+                    y < 0 || y >= state.level.size.l ||
+                    z < 0 || z >= state.level.size.h) return;
+                const layer = state.staticBlocks[z];
+                if (!layer) return;
+                const color = state.staticColor || getStaticDefault(z);
+                layer[y][x] = { r: color.r, g: color.g, b: color.b };
+                requestRender();      // ← 加这行，让 3D 也跟着刷新
+                updateStatus();
+                saveCache();
+            },
+            'moving': () => placeMoving(x, y, z),
+            'falling': () => placeFalling(x, y, z),
+            'prism': () => placePrism(x, y, z),
+            'resizerGrow': () => placeResizer(x, y, z, 'grow'),
+            'resizerShrink': () => placeResizer(x, y, z, 'shrink'),
+            'bumper': () => placeBumper(x, y, z),
+            'checkpoint': () => placeCheckpoint(x, y, z),
+            'cameratrigger': () => placeCameraTrigger(x, y, z),
+            'button': () => placeButton(x, y, z),
+            'seqbutton': () => placeSequenceButton(x, y, z),
+            'othercube': () => placeOtherCube(x, y, z),
+            'darkcube': () => placeDarkCube(x, y, z)
+        };
+        const fn = toolMap[state.currentTool];
+        if (fn) fn();
+        else showToast('未知工具');
         return;
     }
 
@@ -888,15 +923,22 @@ function resetStaticColor(x, y, z) {
 	showToast('已恢复默认颜色');
 }
 
+// 检查目标位置是否已有同类元素；添加模式直接放行
+function checkExist(arr, x, y, z, msg, getPos) {
+    if (state.canvasEditMode === 'add') return false;
+    const gp = getPos || (m => ({ x: m.x, y: m.y, z: m.z }));
+    const exist = arr.some(m => {
+        const p = gp(m);
+        return p && p.x === x && p.y === y && p.z === z;
+    });
+    if (exist) { showToast(msg); return true; }
+    return false;
+}
 
 // 放置各类元素
 function placeMoving(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
-	const exist = state.movingPlatforms.some(m => {
-		const p = getMovingPos(m);
-		return p.x === x && p.y === y && p.z === z;
-	});
-	if (exist) { showToast('该位置已有移动平台'); return; }
+    if (checkExist(state.movingPlatforms, x, y, z, '该位置已有移动平台', getMovingPos)) return;
 	
 		// ===== 新增：保留上次属性 =====
 		const keep = document.getElementById('keepPrevProps').checked;
@@ -954,8 +996,7 @@ function placeMoving(x, y, z) {
 
 function placeFalling(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
-	const exist = state.fallingPlatforms.some(m => m.x === x && m.y === y && m.z === z);
-	if (exist) { showToast('该位置已有掉落平台'); return; }
+	if (checkExist(state.fallingPlatforms, x, y, z, '该位置已有掉落平台')) return;
 		// ===== 新增：保留上次属性（复制所有非标识属性） =====
 		const keep = document.getElementById('keepPrevProps').checked;
 		let baseProps = {};
@@ -982,8 +1023,7 @@ function placeFalling(x, y, z) {
 
 function placePrism(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
-	const exist = state.prisms.some(m => m.x === x && m.y === y && m.z === z);
-	if (exist) { showToast('该位置已有棱柱'); return; }
+	if (checkExist(state.prisms, x, y, z, '该位置已有棱柱')) return;
 		// ===== 新增：保留上次属性 =====
 		const keep = document.getElementById('keepPrevProps').checked;
 		let baseProps = {};
@@ -1011,8 +1051,10 @@ function placeResizer(x, y, z, type) {
 		showToast('尺寸调整器只能在关卡尺寸范围内放置');
 		return;
 	}
-	const exist = state.resizers.some(m => m.x === x && m.y === y && m.z === z && m.type === type);
-	if (exist) { showToast('该位置已有同类型尺寸调整器'); return; }
+	if (state.canvasEditMode !== 'add') {
+        const exist = state.resizers.some(m => m.x === x && m.y === y && m.z === z && m.type === type);
+        if (exist) { showToast('该位置已有同类型尺寸调整器'); return; }
+    }
 		// ===== 新增：保留上次属性 =====
 		const keep = document.getElementById('keepPrevProps').checked;
 		let baseProps = {};
@@ -1037,8 +1079,7 @@ function placeResizer(x, y, z, type) {
 
 function placeBumper(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
-	const exist = state.bumpers.some(m => m.x === x && m.y === y && m.z === z);
-	if (exist) { showToast('该位置已有撞击器'); return; }
+	if (checkExist(state.bumpers, x, y, z, '该位置已有撞击器')) return;
 		// ===== 新增：保留上次属性 =====
 		const keep = document.getElementById('keepPrevProps').checked;
 		let baseProps = {};
@@ -1075,8 +1116,7 @@ function placeBumper(x, y, z) {
 
 function placeCheckpoint(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
-	const exist = state.checkpoints.some(m => m.x === x && m.y === y && m.z === z);
-	if (exist) { showToast('该位置已有存档点'); return; }
+	if (checkExist(state.checkpoints, x, y, z, '该位置已有存档点')) return;
 		// ===== 新增：保留上次属性 =====
 		const keep = document.getElementById('keepPrevProps').checked;
 		let baseProps = {};
@@ -1101,8 +1141,7 @@ function placeCheckpoint(x, y, z) {
 
 function placeCameraTrigger(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
-	const exist = state.cameraTriggers.some(m => m.x === x && m.y === y && m.z === z);
-	if (exist) { showToast('该位置已有相机触发'); return; }
+	if (checkExist(state.cameraTriggers, x, y, z, '该位置已有相机触发')) return;
 		// ===== 新增：保留上次属性 =====
 		const keep = document.getElementById('keepPrevProps').checked;
 		let baseProps = {};
@@ -1141,8 +1180,7 @@ function placeCameraTrigger(x, y, z) {
 
 function placeButton(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
-	const exist = state.buttons.some(m => m.x === x && m.y === y && m.z === z);
-	if (exist) { showToast('该位置已有按钮'); return; }
+	if (checkExist(state.buttons, x, y, z, '该位置已有按钮')) return;
 		// ===== 新增：保留上次属性 =====
 		const keep = document.getElementById('keepPrevProps').checked;
 		let baseProps = {};
@@ -1181,8 +1219,8 @@ function placeButton(x, y, z) {
 
 function placeOtherCube(x, y, z) {
 	expandCanvasRangeForPoint(x + 1, y, z); // 默认 cube 位置
-	const exist = state.otherCubes.some(m => m.triggerX === x && m.triggerY === y && m.triggerZ === z);
-	if (exist) { showToast('该位置已有提示方块触发点'); return; }
+	if (checkExist(state.otherCubes, x, y, z, '该位置已有提示方块触发点',
+        m => ({ x: m.triggerX, y: m.triggerY, z: m.triggerZ }))) return;
 		// ===== 新增：保留上次属性 =====
 		const keep = document.getElementById('keepPrevProps').checked;
 		let baseProps = {};
@@ -1227,8 +1265,8 @@ function placeOtherCube(x, y, z) {
 
 function placeDarkCube(x, y, z) {
 	expandCanvasRangeForPoint(x + 1, y, z); // 默认 cube 位置
-	const exist = state.darkCubes.some(m => m.triggerX === x && m.triggerY === y && m.triggerZ === z);
-	if (exist) { showToast('该位置已有黑暗方块触发点'); return; }
+	if (checkExist(state.darkCubes, x, y, z, '该位置已有黑暗方块触发点',
+        m => ({ x: m.triggerX, y: m.triggerY, z: m.triggerZ }))) return;
 		// ===== 新增：保留上次属性 =====
 		const keep = document.getElementById('keepPrevProps').checked;
 		let baseProps = {};

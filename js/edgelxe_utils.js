@@ -714,9 +714,15 @@ window.pushUndo = function() {
     if (snap === undefined) return;
 
     // ---- 画笔 session：整段只记录一次 ----
-    if (state._brushSessionActive) {
+    /*if (state._brushSessionActive) {
         if (state._brushSessionRecorded) return;   // 已经记过，跳过
         state._brushSessionRecorded = true;
+    }*/
+    // 画笔/长按 session：整段只记录一次
+    if (state._brushSessionActive || state._addSessionActive) {
+        if (state._brushSessionRecorded || state._addSessionRecorded) return;
+        if (state._brushSessionActive) state._brushSessionRecorded = true;
+        if (state._addSessionActive) state._addSessionRecorded = true;
     }
     // ---- session 结束 ----
 
