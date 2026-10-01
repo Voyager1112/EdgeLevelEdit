@@ -551,7 +551,7 @@ function generateShapePoints(coords, shapeType, mode) {
 
 // ==================== 快速填充：坐标管理 ====================
 function qfAddCoord(x, y, z) {
-    if (qf.coords.some(c => c.x === x && c.y === y && c.z === z)) return false;
+    //if (qf.coords.some(c => c.x === x && c.y === y && c.z === z)) return false;
     qf.coords.push({ x, y, z });
     refreshQfCoordList();
     const need = getRequiredPointCount();

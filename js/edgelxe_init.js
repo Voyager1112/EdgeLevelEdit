@@ -865,7 +865,7 @@ B 通道（模型高度）
 
 	canvas.addEventListener('click', function(e) {
         // 添加模式下由 mousedown 负责，click 不再重复放
-        if (state.canvasEditMode === 'add' && state.currentTool !== 'eraser') return;
+        if (state.canvasEditMode === 'add'/* && state.currentTool !== 'eraser'*/) return;
 		const rect = canvas.getBoundingClientRect();
 		const scaleX = canvas.width / rect.width;
 		const scaleY = canvas.height / rect.height;
@@ -919,7 +919,7 @@ B 通道（模型高度）
     let _longPressCell = { x: NaN, y: NaN };
 
     canvas.addEventListener('mousedown', function(e) {
-        if (state.canvasEditMode === 'add' && state.currentTool !== 'eraser') {
+        if (state.canvasEditMode === 'add'/* && state.currentTool !== 'eraser'*/) {
             state._addSessionActive = true;
             state._addSessionRecorded = false;
             _longPressPos = { x: e.clientX, y: e.clientY };

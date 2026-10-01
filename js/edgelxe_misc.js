@@ -991,75 +991,103 @@ function onPointerUp(event) {
     const dx = event.clientX - mouseDownPos.x;
     const dy = event.clientY - mouseDownPos.y;
     const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist > 5) {
-        isDragging = true;
-        return;
-    }
+    if (dist > 5) { isDragging = true; return; }
     if (isDragging) return;
 
-    // 处理右键删除（仅编辑模式）
+    // 辅助：用当前位置重新 raycast，返回命中元素信息
+    function pickElementAtCurrentPos() {
+        const rect = threeContainer.getBoundingClientRect();
+        pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(pointer, threeCamera);
+        const meshes = [...meshToElement.keys()];
+        const intersects = raycaster.intersectObjects(meshes);
+        if (intersects.length === 0) return null;
+        const hitMesh = intersects[0].object;
+        const elem = meshToElement.get(hitMesh);
+        return elem ? { elem, mesh: hitMesh } : null;
+    }
+
+    // ---- 右键删除（编辑模式） ----
     if (event.button === 2 && state.interactionMode === 'edit') {
-		if (state.highlightedMesh) {
-			const elem = meshToElement.get(state.highlightedMesh);
-			if (elem) {
-				if (elem.type === 'static') {
-					// 静态方块使用专用删除函数
-					const { x, y, z } = elem.coord;
-					removeStatic(x, y, z);
-				} else {
-					deleteElement(elem.type, elem.id);
-				}
-				render3D();
-				showToast('已删除元素');
-			}
-		}
+        const hit = pickElementAtCurrentPos();
+        if (hit) {
+            const { elem } = hit;
+            if (elem.type === 'static') {
+                const { x, y, z } = elem.coord;
+                removeStatic(x, y, z);
+            } else {
+                deleteElement(elem.type, elem.id);
+            }
+            render3D();
+            showToast('已删除元素');
+        }
         return;
     }
 
-    // 左键点击（选择或编辑模式）
+    // ---- 左键点击 ----
     if (event.button === 0) {
-		
-        // ← 新增：快速填充记录模式，拦截点击记录元素坐标
+        // 快速填充记录
         if (window.QuickFill && window.QuickFill.isRecording && window.QuickFill.isRecording()) {
-            if (state.highlightedMesh) {
-                const elem = meshToElement.get(state.highlightedMesh);
-                if (elem) {
-                    let coord = null;
-                    if (elem.type === 'static' && elem.coord) {
-                        coord = elem.coord;
-                    } else if (elem.id) {
-                        coord = getElementCoord(elem.type, elem.id);
-                    }
-                    if (coord) {
-                        window.QuickFill.recordAt(coord.x, coord.y, coord.z);
-                    }
+            const hit = pickElementAtCurrentPos();
+            if (hit) {
+                const { elem } = hit;
+                let coord = null;
+                if (elem.type === 'static' && elem.coord) {
+                    coord = elem.coord;
+                } else if (elem.id) {
+                    coord = getElementCoord(elem.type, elem.id);
                 }
-            }
-            return;   // 记录模式下不再执行放置/选择
-        }
-        
-		// ---- 新增：橡皮擦模式 ----
-        if (state.currentTool === 'eraser' && state.interactionMode === 'edit') {
-            if (state.highlightedMesh) {
-                const elem = meshToElement.get(state.highlightedMesh);
-                if (elem) {
-                    if (elem.type === 'static') {
-                        const { x, y, z } = elem.coord;
-                        removeStatic(x, y, z);
-                    } else {
-                        deleteElement(elem.type, elem.id);
-                    }
-                    render3D();
-                    showToast('已删除元素');
-                }
+                if (coord) window.QuickFill.recordAt(coord.x, coord.y, coord.z);
             }
             return;
         }
-		
+
+        // 橡皮擦模式
+        if (state.currentTool === 'eraser' && state.interactionMode === 'edit') {
+            const hit = pickElementAtCurrentPos();
+            if (hit) {
+                const { elem } = hit;
+                if (elem.type === 'static') {
+                    const { x, y, z } = elem.coord;
+                    removeStatic(x, y, z);
+                } else {
+                    deleteElement(elem.type, elem.id);
+                }
+                render3D();
+                showToast('已删除元素');
+            }
+            return;
+        }
+
+        // 选择 / 编辑
         if (state.interactionMode === 'select') {
-            handleSelectClick(event);
+            const hit = pickElementAtCurrentPos();
+            if (hit) {
+                const { elem, mesh } = hit;
+                if (elem.type === 'static') {
+                    selectStatic(elem.coord.x, elem.coord.y, elem.coord.z);
+                } else {
+                    selectElement(elem.type, elem.id);
+                }
+                state.selected3D = elem;
+                state.highlightedMesh = mesh;
+            }
         } else if (state.interactionMode === 'edit') {
-            handleEditClick(event);
+            // 编辑模式：基于当前鼠标位置推算格子
+            const hit = pickElementAtCurrentPos();
+            if (!hit) return;
+            const intersect = raycaster.intersectObjects([...meshToElement.keys()])[0];
+            if (!intersect) return;
+            const faceNormal = intersect.face.normal.clone();
+            faceNormal.transformDirection(intersect.object.matrixWorld);
+            const pos = intersect.point.clone().add(faceNormal.multiplyScalar(0.5));
+            const { w, l } = state.level.size;
+            const centerX = w / 2, centerZ = l / 2;
+            const x = Math.round(pos.x + centerX - 0.5);
+            const y = Math.round(pos.z + centerZ - 0.5);
+            const z = Math.round(pos.y - 0.5);
+            placeElementAt(state.currentTool, x, y, z);
         }
     }
 }

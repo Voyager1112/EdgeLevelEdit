@@ -177,13 +177,44 @@ const fileXmlInput = document.getElementById('fileXmlInput');
  * @param {string|null} elemIdsStr - 元素 ID 列表的 JSON 字符串或 null
  */
 function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
-    if (state.currentTool === 'eraser') {
-        handleEraserClick(x, y, z, staticCoord, elemIdsStr);
-        return;
-    }
-    
-    // ===== 添加模式：跳过所有选中逻辑，直接放置 =====
+    // ===== 添加模式：优先处理，任何工具都不弹选择框 =====
     if (state.canvasEditMode === 'add') {
+        // 添加模式 + 橡皮擦：每次只删一个，优先删最后添加的
+        if (state.currentTool === 'eraser') {
+            // 1. 优先删元素（从数组末尾往前找，即删最后一个添加的）
+            if (elemIdsStr) {
+                const ids = JSON.parse(elemIdsStr);
+                for (let i = ids.length - 1; i >= 0; i--) {
+                    const item = ids[i];
+                    if (item.type === 'waypoint') continue;
+                    deleteElement(item.type, item.id);
+                    requestRender();
+                    updatePanel();
+                    updateElemList();
+                    updateStatus();
+                    saveCache();
+                    return;
+                }
+            }
+
+            // 2. 没有元素了，删静态方块
+            if (staticCoord && state.visibility.static) {
+                const parts = staticCoord.split(',').map(s => parseInt(s.trim()));
+                if (parts.length === 3) {
+                    const layer = state.staticBlocks[parts[2]];
+                    if (layer && layer[parts[1]] && layer[parts[1]][parts[0]]) {
+                        layer[parts[1]][parts[0]] = null;
+                        requestRender();
+                        updatePanel();
+                        updateStatus();
+                        saveCache();
+                    }
+                }
+            }
+            return;
+        }
+
+        // 添加模式 + 其他工具：直接放置
         const toolMap = {
             'static': () => {
                 if (x < 0 || x >= state.level.size.w ||
@@ -193,7 +224,7 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
                 if (!layer) return;
                 const color = state.staticColor || getStaticDefault(z);
                 layer[y][x] = { r: color.r, g: color.g, b: color.b };
-                requestRender();      // ← 加这行，让 3D 也跟着刷新
+                requestRender();
                 updateStatus();
                 saveCache();
             },
@@ -213,6 +244,12 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
         const fn = toolMap[state.currentTool];
         if (fn) fn();
         else showToast('未知工具');
+        return;
+    }
+
+    // ===== 非添加模式 =====
+    if (state.currentTool === 'eraser') {
+        handleEraserClick(x, y, z, staticCoord, elemIdsStr);
         return;
     }
 
@@ -582,9 +619,12 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 
 	// ---- 后续处理（删除逻辑不变） ----
 	if (toDelete.length === 0) {
-		showToast('此处无可删除的可见元素');
-		return;
-	}
+        // 长按/连点场景下静默跳过，不打扰
+        if (!state._addSessionActive) {
+            showToast('此处无可删除的可见元素');
+        }
+        return;
+    }
 	
 	if (toDelete.length === 1) {
 		const item = toDelete[0];
