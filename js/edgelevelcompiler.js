@@ -1105,69 +1105,83 @@ class EdgeCompiler {
         return out;
     }
 
-    // 伸缩型：走"保留路点"（首+尾+唯一中间点），去程到停留位置，再倒着走回来
-    // doReverse=true 补回程（extend）；false 只停在停留位置（noloop）
-// 伸缩型：只输出 [起点, 停留位置, 起点(可选)]
-// doReverse=true 补回程（extend）；false 只停在停留位置（noloop）
-// 伸缩型：只输出 [起点, 停留位置, 起点(可选)]
-// 回程 tt = 去程相同段的 tt
-// doReverse=true 补回程（extend）；false 只停在停留位置（noloop）
-buildTrailExtend(i, table, wps, doReverse) {
-    const { path, times, wpIndices, totalTime } = table;
-    const out = [];
+    // 伸缩型：只输出 [起点, 停留位置, 起点(可选)]
+    // 回程 tt = 去程相同段的 tt，回程 pt = 主方块起点路点的 pt
+    // PauseTime = (最远点时间 - 停留位置时间) * 2 + 最远点 pt
+    buildTrailExtend(i, table, wps, doReverse, lsi) {
+        const { path, times, wpIndices } = table;
+        const out = [];
 
-    // ===== 起点 =====
-    out.push({
-        pos: { ...wps[0].pos },
-        tt: 0,
-        pt: wps[0].pt || 0
-    });
-
-    // ===== path[i] 是否正好是某个主方块路点 =====
-    let k = -1;
-    for (let j = 0; j < wps.length; j++) {
-        if (i === wpIndices[j]) { k = j; break; }
-    }
-
-    // 去程到停留位置那一小段的 tt（回程就用它）
-    let ttForward = 0;
-
-    if (k >= 0) {
-        // 停在主方块路点上
-        if (k > 0) {
-            ttForward = wps[k].tt || 0;
-            out.push({
-                pos: { ...wps[k].pos },
-                tt: ttForward,
-                pt: wps[k].pt || 0
-            });
-        }
-    } else {
-        // 停在段中间
-        let seg = 0;
-        for (let j = 0; j < wps.length - 1; j++) {
-            if (i > wpIndices[j] && i < wpIndices[j + 1]) { seg = j; break; }
-        }
-        const stepsInSeg = i - wpIndices[seg];
-        const segLen = wpIndices[seg + 1] - wpIndices[seg];
-        const origTT = wps[seg + 1].tt || 0;
-        ttForward = segLen > 0 ? Math.round(origTT * stepsInSeg / segLen) : 0;
-        const lastPause = wps[wps.length - 1].pt || 0;
-        const ptStop = Math.max(0, Math.round((totalTime - times[i]) * 2 + lastPause));
-        out.push({ pos: { ...path[i] }, tt: ttForward, pt: ptStop });
-    }
-
-    // ===== 回程：直接回到起点，tt 用去程相同段的 tt =====
-    if (doReverse) {
+        // ===== 起点 =====
         out.push({
             pos: { ...wps[0].pos },
-            tt: ttForward,
-            pt: 0
+            tt: 0,
+            pt: wps[0].pt || 0
         });
+
+        // ===== path[i] 是否正好是某个主方块路点 =====
+        let k = -1;
+        for (let j = 0; j < wps.length; j++) {
+            if (i === wpIndices[j]) { k = j; break; }
+        }
+
+        let ttForward = 0;
+
+        if (k >= 0) {
+            // 停在主方块路点上
+            if (k > 0) {
+                ttForward = wps[k].tt || 0;
+                out.push({
+                    pos: { ...wps[k].pos },
+                    tt: ttForward,
+                    pt: wps[k].pt || 0
+                });
+            }
+        } else {
+            // 停在段中间
+            let seg = 0;
+            for (let j = 0; j < wps.length - 1; j++) {
+                if (i > wpIndices[j] && i < wpIndices[j + 1]) { seg = j; break; }
+            }
+            const stepsInSeg = i - wpIndices[seg];
+            const segLen = wpIndices[seg + 1] - wpIndices[seg];
+            const origTT = wps[seg + 1].tt || 0;
+            ttForward = segLen > 0 ? Math.round(origTT * stepsInSeg / segLen) : 0;
+
+            // ★ 用"最远点"计算 PauseTime
+            const apexIdx = this.findApex(wps, lsi);
+            const apexTime = times[wpIndices[apexIdx]];
+            const apexPT = wps[apexIdx].pt || 0;
+            const ptStop = Math.max(0, Math.round((apexTime - times[i]) * 2 + apexPT));
+
+            out.push({ pos: { ...path[i] }, tt: ttForward, pt: ptStop });
+        }
+
+        // ===== 回程：回到起点，pt 继承主方块起点路点的 pt =====
+        if (doReverse) {
+            out.push({
+                pos: { ...wps[0].pos },
+                tt: ttForward,
+                pt: wps[0].pt || 0
+            });
+        }
+
+        return out;
     }
 
-    return out;
-}
+    // 从 lsi 路点出发，找物理最远点（曼哈顿距离最大）
+    findApex(wps, lsi) {
+        const startIdx = (lsi >= 1 && lsi <= wps.length) ? lsi - 1 : 0;
+        const start = wps[startIdx].pos;
+        let maxDist = -1, apexIdx = startIdx;
+        for (let i = startIdx; i < wps.length; i++) {
+            const p = wps[i].pos;
+            const d = Math.abs(p.x - start.x) + Math.abs(p.y - start.y) + Math.abs(p.z - start.z);
+            if (d > maxDist) { maxDist = d; apexIdx = i; }
+        }
+        return apexIdx;
+    }
+
     // ===== 主入口 =====
     buildTraceByLength(mp) {
         const wps = mp.waypoints || [];
@@ -1182,8 +1196,18 @@ buildTrailExtend(i, table, wps, doReverse) {
         const fullBlock = this.getAttrIgnoreCase(mp.el, 'FullBlock', 'True');
         const parentAutoStart = this.getAttrIgnoreCase(mp.el, 'AutoStart', 'True');
         const parentLsi = this.getAttrIgnoreCase(mp.el, 'LoopStartIndex', '1');
-        const lsi = parseInt(parentLsi, 10);
-        const lsiValid = !isNaN(lsi) && lsi >= 1 && lsi <= wps.length;
+        let lsi = parseInt(parentLsi, 10);
+        if (isNaN(lsi)) lsi = 1;
+
+        // lsi 指向的路点坐标与最后路点不同时，lsi-1
+        if (lsi >= 1 && lsi <= wps.length) {
+            const lsiPos = wps[lsi - 1].pos;
+            const lastPos = wps[wps.length - 1].pos;
+            if (lsiPos.x !== lastPos.x || lsiPos.y !== lastPos.y || lsiPos.z !== lastPos.z) {
+                lsi = lsi - 1;
+            }
+        }
+        const lsiValid = lsi >= 1 && lsi <= wps.length;
 
         let traceType = (this.getAttrIgnoreCase(mp.el, 'TraceType', '') || '').toLowerCase();
         if (traceType !== 'extend' && traceType !== 'cycle' && traceType !== 'noloop') {
@@ -1193,7 +1217,6 @@ buildTrailExtend(i, table, wps, doReverse) {
                 traceType = 'extend';
             } else {
                 const auto = this.detectLoopType(wps, lsi);
-                // 只有明确 ring 才 cycle，其余（stretch/none）都 extend
                 traceType = (auto === 'ring') ? 'cycle' : 'extend';
             }
         }
@@ -1205,18 +1228,26 @@ buildTrailExtend(i, table, wps, doReverse) {
             lsipostime = times[lsiPathIdx];
         }
 
+        // ★ 计算 apex（去程最远点），extend/noloop 的 i 上限
+        const apexIdx = this.findApex(wps, lsiValid ? lsi : 1);
+        const apexPathIdx = wpIndices[apexIdx];
+
         const trails = [];
         for (let i = 1; i < D; i++) {
             let resolvedWps;
+
             if (traceType === 'cycle' && lsiPathIdx >= 0 && i >= lsiPathIdx) {
                 resolvedWps = this.buildTrailCycle(i, table, wps, lsipostime, totalTime);
             } else if (traceType === 'extend') {
-                resolvedWps = this.buildTrailExtend(i, table, wps, true);
+                // ★ 只处理去程段
+                if (i >= apexPathIdx) continue;
+                resolvedWps = this.buildTrailExtend(i, table, wps, true, lsi);
             } else {
-                resolvedWps = this.buildTrailExtend(i, table, wps, false);
+                // noloop 也只处理去程段
+                if (i >= apexPathIdx) continue;
+                resolvedWps = this.buildTrailExtend(i, table, wps, false, lsi);
             }
             if (!resolvedWps || resolvedWps.length === 0) continue;
-
             trails.push(this.makeTrailMp(origId, i, resolvedWps, parentAutoStart, parentLsi, fullBlock));
         }
         return trails;
