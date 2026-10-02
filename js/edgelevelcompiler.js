@@ -945,15 +945,33 @@ class EdgeCompiler {
         }
         return set;
     }
-
+    
+    // 计算 path 中 a 到 b 的曼哈顿长度
+    pathLenBetween(path, a, b) {
+        let len = 0;
+        for (let i = a; i < b; i++) {
+            len += Math.abs(path[i+1].x - path[i].x)
+                 + Math.abs(path[i+1].y - path[i].y)
+                 + Math.abs(path[i+1].z - path[i].z);
+        }
+        return len;
+    }
+    
+    // 计算 wps 中从 a 到 b 的总时间（含每段的 travel + pause）
+    pathTimeBetween(wps, a, b) {
+        let t = 0;
+        for (let i = a + 1; i <= b; i++) {
+            t += (wps[i].tt || 0) + (wps[i].pt || 0);
+        }
+        return t;
+    }
+    
     // 主入口
     applyTraceSugar(L, mpData, rawBtns) {
         if (!mpData || mpData.length === 0) return;
         const referenced = this.collectReferencedMpIds(rawBtns);
 
         const originalCount = mpData.length;
-        const added = [];
-
         for (let i = 0; i < originalCount; i++) {
             const mp = mpData[i];
             const el = mp.el;
@@ -961,85 +979,272 @@ class EdgeCompiler {
             const traceAttr = this.getAttrIgnoreCase(el, 'Trace', 'false');
             if (String(traceAttr).toLowerCase() !== 'true') continue;
 
-            let tl = parseInt(this.getAttrIgnoreCase(el, 'TraceLength', '-1'), 10);
-            if (isNaN(tl)) tl = -1;
-            if (tl === 0) continue;   // tracelength = 0：不执行
-
             const mpId = this.getAttrIgnoreCase(el, 'ID');
             const autoStart = this.parseBool(this.getAttrIgnoreCase(el, 'AutoStart', 'True'));
             const isReferenced = referenced.has(mpId);
-            if (!autoStart && !isReferenced) continue;   // 未触发
+            if (!autoStart && !isReferenced) continue;
 
-            // tl < 0：曼哈顿路径全铺
-            if (tl < 0) {
-                const trails = this.buildTraceByLength(mp);
-                for (const t of trails) {
-                    mpData.push(t);
-                    added.push({ original: mp, trail: t });
-                }
-                if (isReferenced) this.addButtonRefsToTrails(rawBtns, mpId, trails);
-            } else {
-                // tl > 0：先不实现，占位
-                // const trails = this.buildTraceByCount(mp, tl);
-                // ...
+            const trails = this.buildTraceByLength(mp);
+            if (!trails || trails.length === 0) continue;
+
+            for (const t of trails) {
+                const newIdx = mpData.length;
+                mpData.push(t);
+                const tId = this.getAttrIgnoreCase(t.el, 'ID');
+                if (tId) this.regId(tId, 'moving_platform', newIdx);
             }
+            if (isReferenced) this.addButtonRefsToTrails(rawBtns, mpId, trails);
         }
     }
 
-    // tracelength < 0 情形
+    // ===== 时间-坐标表 =====
+    buildTraceTable(mp) {
+        const wps = mp.waypoints || [];
+        if (wps.length === 0) return { path: [], times: [], pauseAt: [], wpIndices: [], totalTime: 0 };
+
+        const path = [];
+        const times = [];
+        const pauseAt = [];
+        const wpIndices = [0];
+
+        path.push({ ...wps[0].pos });
+        times.push(0);
+        pauseAt.push(wps[0].pt || 0);
+
+        let departTime = wps[0].pt || 0;   // 从 w1 出发的时刻
+
+        for (let i = 1; i < wps.length; i++) {
+            const curWp = wps[i];
+            const segPath = this.buildManhattanPath(wps[i - 1].pos, curWp.pos);
+            const D = segPath.length - 1;
+            const tt = curWp.tt || 0;
+
+            if (D <= 0) {
+                // 原地（位置相同的路点）
+                wpIndices.push(path.length - 1);
+                departTime += tt + (curWp.pt || 0);
+                continue;
+            }
+
+            for (let j = 1; j <= D; j++) {
+                const t = departTime + (j * tt) / D;
+                path.push({ ...segPath[j] });
+                times.push(t);
+                pauseAt.push(j === D ? (curWp.pt || 0) : 0);
+            }
+            wpIndices.push(path.length - 1);
+            departTime += tt + (curWp.pt || 0);
+        }
+
+        return { path, times, pauseAt, wpIndices, totalTime: departTime };
+    }
+
+    // ===== 生成单个尾迹方块 =====
+    makeTrailMp(origId, idx, resolvedWps, parentAutoStart, parentLsi, fullBlock) {
+        const trailEl = this.xml.createElement('MovingPlatform');
+        const trailId = origId + '_T' + idx;
+        trailEl.setAttribute('ID', trailId);
+        trailEl.setAttribute('AutoStart', parentAutoStart);
+        trailEl.setAttribute('LoopStartIndex', parentLsi);
+        trailEl.setAttribute('FullBlock', fullBlock);
+
+        for (const w of resolvedWps) {
+            const wpEl = this.xml.createElement('Waypoint');
+            wpEl.setAttribute('Position', `${w.pos.x},${w.pos.y},${w.pos.z}`);
+            wpEl.setAttribute('TravelTime', String(w.tt));
+            wpEl.setAttribute('PauseTime', String(w.pt));
+            trailEl.appendChild(wpEl);
+        }
+
+        return {
+            el: trailEl,
+            waypoints: resolvedWps,
+            offset: { x: 0, y: 0, z: 0 },
+            relatedTo: '',
+            _resolved: true,
+            _resolvedWaypoints: resolvedWps
+        };
+    }
+
+    // 环路型：复制主方块完整路点，在 path[i] 处插一个停留路点
+    buildTrailCycle(i, table, wps, lsipostime, terminalTime) {
+        const { path, times, wpIndices } = table;
+
+        // path[i] 落在 wps[k] 与 wps[k+1] 之间
+        let k = 0;
+        for (let j = 0; j < wps.length - 1; j++) {
+            if (i >= wpIndices[j] && i < wpIndices[j + 1]) { k = j; break; }
+        }
+
+        const stepsInSeg = i - wpIndices[k];
+        const segLen = wpIndices[k + 1] - wpIndices[k];
+        const origTT = wps[k + 1].tt || 0;
+        const tt1 = segLen > 0 ? Math.round(origTT * stepsInSeg / segLen) : 0;
+        const tt2 = origTT - tt1;
+
+        const insertPT = Math.max(0, Math.round(terminalTime + times[i] - 2 * lsipostime));
+
+        const out = [];
+        out.push({ pos: { ...wps[0].pos }, tt: 0, pt: wps[0].pt || 0 });
+
+        for (let j = 1; j < wps.length; j++) {
+            let tt = wps[j].tt || 0;
+            let pt = wps[j].pt || 0;
+
+            // 在 wps[k] → wps[k+1] 段插入
+            if (j === k + 1 && stepsInSeg > 0) {
+                out.push({ pos: { ...path[i] }, tt: tt1, pt: insertPT });
+                tt = tt2;
+            }
+            // 最后路点暂停时间扣减 insertPT
+            if (j === wps.length - 1) {
+                pt = Math.max(0, pt - insertPT);
+            }
+            out.push({ pos: { ...wps[j].pos }, tt, pt });
+        }
+        return out;
+    }
+
+    // 伸缩型：走"保留路点"（首+尾+唯一中间点），去程到停留位置，再倒着走回来
+    // doReverse=true 补回程（extend）；false 只停在停留位置（noloop）
+// 伸缩型：只输出 [起点, 停留位置, 起点(可选)]
+// doReverse=true 补回程（extend）；false 只停在停留位置（noloop）
+// 伸缩型：只输出 [起点, 停留位置, 起点(可选)]
+// 回程 tt = 去程相同段的 tt
+// doReverse=true 补回程（extend）；false 只停在停留位置（noloop）
+buildTrailExtend(i, table, wps, doReverse) {
+    const { path, times, wpIndices, totalTime } = table;
+    const out = [];
+
+    // ===== 起点 =====
+    out.push({
+        pos: { ...wps[0].pos },
+        tt: 0,
+        pt: wps[0].pt || 0
+    });
+
+    // ===== path[i] 是否正好是某个主方块路点 =====
+    let k = -1;
+    for (let j = 0; j < wps.length; j++) {
+        if (i === wpIndices[j]) { k = j; break; }
+    }
+
+    // 去程到停留位置那一小段的 tt（回程就用它）
+    let ttForward = 0;
+
+    if (k >= 0) {
+        // 停在主方块路点上
+        if (k > 0) {
+            ttForward = wps[k].tt || 0;
+            out.push({
+                pos: { ...wps[k].pos },
+                tt: ttForward,
+                pt: wps[k].pt || 0
+            });
+        }
+    } else {
+        // 停在段中间
+        let seg = 0;
+        for (let j = 0; j < wps.length - 1; j++) {
+            if (i > wpIndices[j] && i < wpIndices[j + 1]) { seg = j; break; }
+        }
+        const stepsInSeg = i - wpIndices[seg];
+        const segLen = wpIndices[seg + 1] - wpIndices[seg];
+        const origTT = wps[seg + 1].tt || 0;
+        ttForward = segLen > 0 ? Math.round(origTT * stepsInSeg / segLen) : 0;
+        const lastPause = wps[wps.length - 1].pt || 0;
+        const ptStop = Math.max(0, Math.round((totalTime - times[i]) * 2 + lastPause));
+        out.push({ pos: { ...path[i] }, tt: ttForward, pt: ptStop });
+    }
+
+    // ===== 回程：直接回到起点，tt 用去程相同段的 tt =====
+    if (doReverse) {
+        out.push({
+            pos: { ...wps[0].pos },
+            tt: ttForward,
+            pt: 0
+        });
+    }
+
+    return out;
+}
+    // ===== 主入口 =====
     buildTraceByLength(mp) {
         const wps = mp.waypoints || [];
         if (wps.length < 2) return [];
 
-        const start = wps[0].pos;
-        const end = wps[wps.length - 1].pos;
-        const totalT = wps[wps.length - 1].tt || 0;
-        const lastPause = wps[wps.length - 1].pt || 0;
+        const table = this.buildTraceTable(mp);
+        const { path, times, wpIndices, totalTime } = table;
+        const D = path.length - 1;
+        if (D <= 0) return [];
 
-        const path = this.buildManhattanPath(start, end);
-        const d = path.length - 1;
-        if (d <= 0) return [];
-
-        const fullBlock = this.getAttrIgnoreCase(mp.el, 'FullBlock', 'True');
         const origId = this.getAttrIgnoreCase(mp.el, 'ID') || 'M';
+        const fullBlock = this.getAttrIgnoreCase(mp.el, 'FullBlock', 'True');
+        const parentAutoStart = this.getAttrIgnoreCase(mp.el, 'AutoStart', 'True');
+        const parentLsi = this.getAttrIgnoreCase(mp.el, 'LoopStartIndex', '1');
+        const lsi = parseInt(parentLsi, 10);
+        const lsiValid = !isNaN(lsi) && lsi >= 1 && lsi <= wps.length;
+
+        let traceType = (this.getAttrIgnoreCase(mp.el, 'TraceType', '') || '').toLowerCase();
+        if (traceType !== 'extend' && traceType !== 'cycle' && traceType !== 'noloop') {
+            if (!lsiValid) {
+                traceType = 'noloop';
+            } else if (wps.length <= 3) {
+                traceType = 'extend';
+            } else {
+                const auto = this.detectLoopType(wps, lsi);
+                // 只有明确 ring 才 cycle，其余（stretch/none）都 extend
+                traceType = (auto === 'ring') ? 'cycle' : 'extend';
+            }
+        }
+
+        let lsiPathIdx = -1;
+        let lsipostime = 0;
+        if (lsiValid) {
+            lsiPathIdx = wpIndices[lsi - 1];
+            lsipostime = times[lsiPathIdx];
+        }
 
         const trails = [];
-        for (let i = 1; i < d; i++) {
-            const trailEl = this.xml.createElement('MovingPlatform');
-            const trailId = origId + '_T' + i;
-            trailEl.setAttribute('ID', trailId);
-            trailEl.setAttribute('AutoStart', 'True');
-            trailEl.setAttribute('LoopStartIndex', '0');
-            trailEl.setAttribute('FullBlock', fullBlock);
-
-            // 累积时间：路径第 k 步的到达时间 = totalT * k / d
-            const resolvedWps = [];
-            for (let k = 0; k <= i; k++) {
-                const p = path[k];
-                const acc = totalT * k / d;
-                const prevAcc = totalT * (k - 1) / d;
-                const tt = k === 0 ? 0 : Math.round(acc - prevAcc);
-                const pt = (k === i) ? lastPause : 0;
-
-                const wpEl = this.xml.createElement('Waypoint');
-                wpEl.setAttribute('Position', `${p.x},${p.y},${p.z}`);
-                wpEl.setAttribute('TravelTime', String(tt));
-                wpEl.setAttribute('PauseTime', String(pt));
-                trailEl.appendChild(wpEl);
-
-                resolvedWps.push({ pos: { ...p }, tt, pt });
+        for (let i = 1; i < D; i++) {
+            let resolvedWps;
+            if (traceType === 'cycle' && lsiPathIdx >= 0 && i >= lsiPathIdx) {
+                resolvedWps = this.buildTrailCycle(i, table, wps, lsipostime, totalTime);
+            } else if (traceType === 'extend') {
+                resolvedWps = this.buildTrailExtend(i, table, wps, true);
+            } else {
+                resolvedWps = this.buildTrailExtend(i, table, wps, false);
             }
+            if (!resolvedWps || resolvedWps.length === 0) continue;
 
-            trails.push({
-                el: trailEl,
-                waypoints: resolvedWps,
-                offset: { x: 0, y: 0, z: 0 },
-                relatedTo: '',
-                _resolved: true,
-                _resolvedWaypoints: resolvedWps
-            });
+            trails.push(this.makeTrailMp(origId, i, resolvedWps, parentAutoStart, parentLsi, fullBlock));
         }
         return trails;
+    }
+
+    detectLoopType(wps, lsi) {
+        const sub = wps.slice(lsi - 1);
+        if (sub.length < 2) return 'none';
+
+        const posEq = (a, b) => a.x === b.x && a.y === b.y && a.z === b.z;
+        const first = sub[0].pos;
+        const last  = sub[sub.length - 1].pos;
+
+        // 1) 先判回文 → 伸缩型
+        let isPalin = true;
+        for (let i = 0; i < Math.floor(sub.length / 2); i++) {
+            if (!posEq(sub[i].pos, sub[sub.length - 1 - i].pos)) {
+                isPalin = false;
+                break;
+            }
+        }
+        if (isPalin) return 'stretch';
+
+        // 2) 再判首尾相同 → 环路型
+        if (posEq(first, last)) return 'ring';
+
+        // 3) 都不满足
+        return 'none';
     }
 
     // 给引用了主方块的按钮/序列添加对所有尾迹方块的引用
