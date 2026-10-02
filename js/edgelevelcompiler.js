@@ -1157,12 +1157,22 @@ class EdgeCompiler {
             out.push({ pos: { ...path[i] }, tt: ttForward, pt: ptStop });
         }
 
-        // ===== 回程：回到起点，pt 继承主方块起点路点的 pt =====
-        if (doReverse) {
+        // ===== 回程：回到起点，pt 用主方块中"该坐标最后一次出现"的路点的 pt =====
+        if (doReverse && i > 0) {
+            const backPos = wps[0].pos;
+            let backPt = 0;
+            // 从后往前找，坐标 == backPos 的主方块路点，取它的 pt
+            for (let j = wps.length - 1; j >= 0; j--) {
+                const p = wps[j].pos;
+                if (p.x === backPos.x && p.y === backPos.y && p.z === backPos.z) {
+                    backPt = wps[j].pt || 0;
+                    break;
+                }
+            }
             out.push({
-                pos: { ...wps[0].pos },
+                pos: { ...backPos },
                 tt: ttForward,
-                pt: wps[0].pt || 0
+                pt: backPt
             });
         }
 
@@ -1233,17 +1243,22 @@ class EdgeCompiler {
         const apexPathIdx = wpIndices[apexIdx];
 
         const trails = [];
+        const startWpLsi = 0;
+
+        // ★ 起点尾迹方块：无论 lsi 是几都生成
+        {
+            const startWp = [{ pos: { ...wps[0].pos }, tt: 0, pt: wps[0].pt || 0 }];
+            trails.push(this.makeTrailMp(origId, 0, startWp, parentAutoStart, startWpLsi, fullBlock));
+        }
+
         for (let i = 1; i < D; i++) {
             let resolvedWps;
-
             if (traceType === 'cycle' && lsiPathIdx >= 0 && i >= lsiPathIdx) {
                 resolvedWps = this.buildTrailCycle(i, table, wps, lsipostime, totalTime);
             } else if (traceType === 'extend') {
-                // ★ 只处理去程段
                 if (i >= apexPathIdx) continue;
                 resolvedWps = this.buildTrailExtend(i, table, wps, true, lsi);
             } else {
-                // noloop 也只处理去程段
                 if (i >= apexPathIdx) continue;
                 resolvedWps = this.buildTrailExtend(i, table, wps, false, lsi);
             }
