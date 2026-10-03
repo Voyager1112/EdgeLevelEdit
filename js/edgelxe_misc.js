@@ -1425,17 +1425,24 @@ document.getElementById('compileImportBtn').addEventListener('click', async () =
 
         // 编译
         const binBuffer = compiler.compile();
-        const xmlBaseName = xmlFile.name.replace(/\.[^.]+$/, '') || 'imported_level';
-        const internalName = xmlBaseName;
 
-		let esoBuffer = null;
-		let esoName = null;
-        if (pngFiles.length > 0) {
+        // ★ 自定义文件名
+        const customName = (document.getElementById('compileCustomName')?.value || '').trim();
+        const baseName = customName || xmlFile.name.replace(/\.[^.]+$/, '') || 'imported_level';
+
+        // ★ 是否跳过 ESO
+        const skipEso = document.getElementById('compileSkipEso')?.checked || false;
+
+        let esoBuffer = null;
+        let esoName = null;
+        if (skipEso) {
+            addCompileLog('info', '已勾选不生成 ESO，跳过');
+        } else if (pngFiles.length > 0) {
             const theme = parseInt(compileTheme.value, 10);
             const layeredMode = document.getElementById('compileLayeredTexture')?.checked || false;
             try {
-                esoBuffer = generateESOFromPngs(compiler.xml, compiler.pngs, theme, xmlBaseName, layeredMode);
-                esoName = generateEsoName(xmlBaseName);
+                esoBuffer = generateESOFromPngs(compiler.xml, compiler.pngs, theme, baseName, layeredMode);
+                esoName = generateEsoName(baseName);
                 addCompileLog('info', `已生成 ESO${layeredMode ? '（层高渐变）' : ''} (${esoBuffer.byteLength} 字节)`);
             } catch (e) {
                 addCompileLog('warn', `未生成 ESO：${e.message}。仍可下载 BIN 和 ZIP。`);
@@ -1446,7 +1453,7 @@ document.getElementById('compileImportBtn').addEventListener('click', async () =
             addCompileLog('info', '未选择PNG，不生成ESO文件');
         }
 
-		renderDownloadLinks(binBuffer, esoBuffer, xmlBaseName, esoName);
+        renderDownloadLinks(binBuffer, esoBuffer, baseName, esoName);
 
         addCompileLog('ok', '编译完成！');
 
@@ -1462,6 +1469,10 @@ document.getElementById('compileBtn').addEventListener('click', () => {
     compileLog.textContent = '';
     compileDownloadArea.innerHTML = '';
     compilePngInput.value = ''; // 清空之前的文件
+    const customInput = document.getElementById('compileCustomName');
+    if (customInput) customInput.value = '';
+    const skipCheck = document.getElementById('compileSkipEso');
+    if (skipCheck) skipCheck.checked = false;
 });
 
 // 关闭对话框

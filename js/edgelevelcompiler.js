@@ -1105,78 +1105,93 @@ class EdgeCompiler {
         return out;
     }
 
-    // 伸缩型：只输出 [起点, 停留位置, 起点(可选)]
-    // 回程 tt = 去程相同段的 tt，回程 pt = 主方块起点路点的 pt
-    // PauseTime = (最远点时间 - 停留位置时间) * 2 + 最远点 pt
+    // 伸缩型：复制主方块中"停留位置之前"的所有主路点，加停留路点，回程倒着走
+    // doReverse=true 补回程（extend）；false 只停在停留位置（noloop）
+    // lsi === 0 时不给停留路点设置 PauseTime
     buildTrailExtend(i, table, wps, doReverse, lsi) {
         const { path, times, wpIndices } = table;
         const out = [];
 
-        // ===== 起点 =====
-        out.push({
-            pos: { ...wps[0].pos },
-            tt: 0,
-            pt: wps[0].pt || 0
-        });
-
-        // ===== path[i] 是否正好是某个主方块路点 =====
+        // ===== 定位 i =====
         let k = -1;
         for (let j = 0; j < wps.length; j++) {
             if (i === wpIndices[j]) { k = j; break; }
         }
+        const isOnWp = (k >= 0);
 
-        let ttForward = 0;
-
-        if (k >= 0) {
-            // 停在主方块路点上
-            if (k > 0) {
-                ttForward = wps[k].tt || 0;
-                out.push({
-                    pos: { ...wps[k].pos },
-                    tt: ttForward,
-                    pt: wps[k].pt || 0
-                });
-            }
+        let seg;   // 停留位置所在段左侧的主路点索引
+        if (isOnWp) {
+            seg = k;
         } else {
-            // 停在段中间
-            let seg = 0;
             for (let j = 0; j < wps.length - 1; j++) {
                 if (i > wpIndices[j] && i < wpIndices[j + 1]) { seg = j; break; }
             }
-            const stepsInSeg = i - wpIndices[seg];
-            const segLen = wpIndices[seg + 1] - wpIndices[seg];
-            const origTT = wps[seg + 1].tt || 0;
-            ttForward = segLen > 0 ? Math.round(origTT * stepsInSeg / segLen) : 0;
-
-            // ★ 用"最远点"计算 PauseTime
-            const apexIdx = this.findApex(wps, lsi);
-            const apexTime = times[wpIndices[apexIdx]];
-            const apexPT = wps[apexIdx].pt || 0;
-            const ptStop = Math.max(0, Math.round((apexTime - times[i]) * 2 + apexPT));
-
-            out.push({ pos: { ...path[i] }, tt: ttForward, pt: ptStop });
         }
 
-        // ===== 回程：回到起点，pt 用主方块中"该坐标最后一次出现"的路点的 pt =====
-        if (doReverse && i > 0) {
-            const backPos = wps[0].pos;
-            let backPt = 0;
-            // 从后往前找，坐标 == backPos 的主方块路点，取它的 pt
-            for (let j = wps.length - 1; j >= 0; j--) {
-                const p = wps[j].pos;
-                if (p.x === backPos.x && p.y === backPos.y && p.z === backPos.z) {
-                    backPt = wps[j].pt || 0;
-                    break;
-                }
-            }
+        // ===== 去程主路点 w_0..w_seg =====
+        for (let j = 0; j <= seg; j++) {
             out.push({
-                pos: { ...backPos },
-                tt: ttForward,
-                pt: backPt
+                pos: { ...wps[j].pos },
+                tt: j === 0 ? 0 : (wps[j].tt || 0),
+                pt: wps[j].pt || 0
             });
         }
 
+        // ===== 停留路点（i 落在段中间时） =====
+        let ttStop = 0;
+        if (!isOnWp) {
+            const stepsInSeg = i - wpIndices[seg];
+            const segLen = wpIndices[seg + 1] - wpIndices[seg];
+            const origTT = wps[seg + 1].tt || 0;
+            ttStop = segLen > 0 ? Math.round(origTT * stepsInSeg / segLen) : 0;
+
+            // 停留 pt：用 apex 计算
+            const apexIdx = this.findApex(wps, lsi);
+            const apexTime = times[wpIndices[apexIdx]];
+            const apexPT = wps[apexIdx].pt || 0;
+            let ptStop = Math.max(0, Math.round((apexTime - times[i]) * 2 + apexPT));
+
+            // ★ lsi=0 时不给停留路点设 pt
+            if (lsi === 0) ptStop = 0;
+
+            out.push({ pos: { ...path[i] }, tt: ttStop, pt: ptStop });
+        }
+
+        // ===== 回程 =====
+        if (doReverse) {
+            // 从停留位置回到 w_seg（仅当 i 不是主路点时才有这一段）
+            if (!isOnWp) {
+                const p = wps[seg].pos;
+                out.push({
+                    pos: { ...p },
+                    tt: ttStop,
+                    pt: this.getLastPt(wps, p)
+                });
+            }
+            // w_{seg-1} .. w_0（倒序），tt 用主方块对应段的 tt
+            for (let j = seg - 1; j >= 0; j--) {
+                const tt = wps[j + 1].tt || 0;
+                const p = wps[j].pos;
+                out.push({
+                    pos: { ...p },
+                    tt,
+                    pt: this.getLastPt(wps, p)
+                });
+            }
+        }
+
         return out;
+    }
+
+    // 取主方块中该坐标"最后一次出现"的路点的 pt（用于回程继承）
+    getLastPt(wps, pos) {
+        for (let j = wps.length - 1; j >= 0; j--) {
+            const p = wps[j].pos;
+            if (p.x === pos.x && p.y === pos.y && p.z === pos.z) {
+                return wps[j].pt || 0;
+            }
+        }
+        return 0;
     }
 
     // 从 lsi 路点出发，找物理最远点（曼哈顿距离最大）

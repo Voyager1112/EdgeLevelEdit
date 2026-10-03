@@ -51,8 +51,12 @@ function exportPNG() {
 // 导出XML（含OtherCube, DarkCube）
 function generateXMLString() {
 	const lv = state.level;
+	// ★ 只转义"裸 &"，保留 &#10; 这类实体引用原样输出
+	const safeName = String(lv.name || '')
+		.replace(/&(?!(#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);)/g, '&amp;')
+		.replace(/"/g, '&quot;');
 	let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-	let levelAttrs = ` ID="${lv.id}" Name="${lv.name}" TimeThresholds="${lv.timeThresholds.join(',')}"\n`;
+	let levelAttrs = ` ID="${lv.id}" Name="${safeName}" TimeThresholds="${lv.timeThresholds.join(',')}"\n`;
 	levelAttrs += `       Size="${lv.size.w}x${lv.size.l}x${lv.size.h}" SpawnPoint="${formatCoord(lv.spawn)}" ExitPoint="${formatCoord(lv.exit)}"\n`;
 	levelAttrs += `       Theme="${lv.theme}" MusicJava="${lv.musicJava}" Music="${lv.music}" Zoom="${lv.zoom}"`;
 

@@ -229,6 +229,10 @@
 				<button id="closeCompileDialogBtn" style="background:#a03030; border:1px solid #a03030; color:#fff; padding:4px 14px; border-radius:4px; cursor:pointer; font-size:14px; flex-shrink:0;">✕ 关闭</button>
 			</div>
 			<div style="margin-bottom:12px;">
+                <label>自定义文件名：
+                        <input type="text" id="compileCustomName" placeholder="留空则使用原文件名"
+                               style="width:200px; background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:4px; border-radius:4px;">
+                </label>
 				<label>主题：
 					<select id="compileTheme">
 						<option value="0">0 (白色)</option>
@@ -236,10 +240,15 @@
 						<option value="2">2 (深灰)</option>
 						<option value="3" selected>3 (黑色)</option>
 					</select>
-					<input type="checkbox" id="compilePhoneMode"> 编译手机版（时间阈值×100）
-                    <input type="checkbox" id="compileLayeredTexture" checked>
-        原版风格模型
 				</label>
+                <div style="margin-bottom:12px;">
+                    <label style="margin-left:16px;">
+                        <input type="checkbox" id="compilePhoneMode"> 编译手机版（时间阈值×100）
+                    </label>
+                        <input type="checkbox" id="compileLayeredTexture" checked> 原版风格模型
+                        <input type="checkbox" id="compileSkipEso"> 不生成 ESO 模型
+                    </label>
+                </div>
 			</div>
 			
 			<!-- XML 选择器（新增） -->
