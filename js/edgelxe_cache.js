@@ -1,9 +1,8 @@
-// 缓存
 function saveCache() {
     if (state._suppressUI) return;
-	try {
-		const data = {
-			level: state.level,
+    try {
+        const data = {
+            level: state.level,
 			currentLayer: state.currentLayer,
 			staticBlocks: state.staticBlocks,
 			movingPlatforms: state.movingPlatforms,
@@ -26,39 +25,40 @@ function saveCache() {
 			_idCounters: state._idCounters,
 			levelUseAngle: state.levelUseAngle,
 			autoName: state.autoName
-		};
+        };
         const str = JSON.stringify(data);
-        const snap = _serializeHistory();
-        // ---- 内容变化 → 记录上一个状态进撤销栈 ----
-        if (state._lastSavedSnapshot !== undefined && snap !== state._lastSavedSnapshot) {
-            window.pushUndo && window.pushUndo();
-        }
-        state._lastSavedSnapshot = snap;
-        // ---- 挂接结束 ----
-        
-		localStorage.setItem(CACHE_KEY, str);
-		rebuildSpatialIndex();  // 新增
-        
-        // ===== 若当前选中是序列相关，自动刷新元素列表 =====
-        /*const sel = state.selectedElement;
-        if (sel && (sel.type === 'seqbutton' || sel.type === 'buttonsequence')) {
-            if (!window._pendingElemListRefresh) {
-                window._pendingElemListRefresh = true;
-                requestAnimationFrame(() => {
-                    window._pendingElemListRefresh = false;
-                    if (typeof updateElemList === 'function') updateElemList();
-                });
-            }
-        }*/
-        // ===== 节流刷新元素列表（所有编辑操作都会经过这里） =====
-        if (!window._pendingElemListRefresh) {
-            window._pendingElemListRefresh = true;
-            requestAnimationFrame(() => {
-                window._pendingElemListRefresh = false;
-                if (typeof updateElemList === 'function') updateElemList();
-            });
-        }
-	} catch (e) {}
+        localStorage.setItem(CACHE_KEY, str);
+        rebuildSpatialIndex();
+        // 同步到多项目存储
+        if (window.PM && window.PM.sync) window.PM.sync();
+    } catch (e) {}
+}
+
+// 新函数，承担原 saveCache 里的"撤销栈 + 刷新元素列表"逻辑
+function undoStack() {
+    if (state._suppressUI) return;
+    const snap = _serializeHistory();
+    if (state._lastSavedSnapshot !== undefined && snap !== state._lastSavedSnapshot) {
+        window.pushUndo && window.pushUndo();
+    }
+    state._lastSavedSnapshot = snap;
+}
+
+function refreshElemList() {
+    if (!window._pendingElemListRefresh) {
+        window._pendingElemListRefresh = true;
+        requestAnimationFrame(() => {
+            window._pendingElemListRefresh = false;
+            if (typeof updateElemList === 'function') updateElemList();
+        });
+    }
+}
+
+// 统一的"存+刷新"入口
+function uniInterface() {
+    saveCache();
+    undoStack();
+    refreshElemList();
 }
 
 function loadCache() {

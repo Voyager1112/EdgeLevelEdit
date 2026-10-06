@@ -31,7 +31,7 @@
             <label>Angle <input type="number" id="levelAngle" value="22" min="-184" max="184" style="width:40px;"></label>
             <label>FOV <input type="number" id="levelFov" value="22" min="0" max="184" style="width:40px;"></label>
             <label>ModelTheme <input type="number" id="modelTheme" value="0" min="0" style="width:40px;"></label>
-            <button id="applyLevelBtn">应用</button>
+            <button id="projectManagerBtn">📁 项目</button>
 			<button id="newProjectBtn">新建项目</button>
 			<div class="sep"></div>
 			<label style="font-size:12px;color:#6a8aaa;">
@@ -45,6 +45,10 @@
 			<button id="compileBtn">📦 编译</button>
 			<div class="sep"></div>
 			<button id="helpBtn">帮助</button>
+            <div class="sep"></div>
+            <label style="font-size:12px;color:#6a8aaa;" id="msEmptyLabel" hidden>
+                <input type="checkbox" id="msIncludeEmpty"> 选择模式包含空格
+            </label>
 			<a href="./misc/levelgen.html">关卡生成器</a>
 			<a href="./misc/profedit.html" type="text/html">移动版存档编辑器</a>
         </div>
@@ -58,8 +62,10 @@
 		</span>
         <div class="sep"></div>
         <span style="font-size:12px;color:#6a8aaa;">工具:</span>
+        <button id="toolMultiSelect">选择</button>
         <button id="toolStatic" class="active">静态方块</button>
         <button id="toolMoving">移动方块</button>
+        <button id="toolWaypoint">路点</button>
         <button id="toolFalling">掉落方块</button>
         <button id="toolPrism">棱柱</button>
         <button id="toolResizerGrow">放大器</button>
@@ -125,10 +131,7 @@
 				</div>
 			</div>
 		</div>
-		
-		<!-- 分隔条（拖拽手柄） -->
-		<div class="split-handle" id="splitHandle" style="flex:0 0 4px; background: #2a3a5a; cursor: col-resize; position: relative; z-index: 10; display: none;"></div>
-		
+
 		<!-- 3D视图容器（并排） -->
 		<div class="view3d-container" id="view3dContainer">
 			<div class="three-controls" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; background:rgba(13,13,31,0.8); padding:4px 12px; border-radius:6px;">
@@ -267,7 +270,7 @@
 				<button id="clearAllBtn" class="cancel-btn" style="padding:4px 12px;">清除全部</button>
 			</div>
 			<div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
-				<button id="compileCurrentBtn" style="background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">📥 导入当前关卡</button>
+				<button id="importCurrentBtn" style="background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">📥 导入当前关卡</button>
 				<button id="compileImportBtn" style="background:#2a5a7a; border:1px solid #4a8aba; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">📂 编译</button>
 			</div>
 			
@@ -296,11 +299,13 @@
 	<!-- 顺序不能随便改 -->
 	<script src="./js/edgelxe_utils.js"></script>
 	<script src="./js/edgelxe_cache.js"></script>
+    <script src="./js/edgelxe_projects.js"></script>
 	<script src="./js/edgelxe_render2d.js"></script>
 	<script src="./js/edgelxe_panel.js"></script>
 	<script src="./js/edgelxe_file.js"></script>
 	<script src="./js/edgelxe_3d.js"></script>
     <script src="./js/edgelxe_quickfill.js"></script>
+    <script src="./js/edgelxe_select.js"></script>
 	<script src="./js/edgelevelcompiler.js"></script>
 	<script src="./js/edgelxe_elem.js"></script>
 	<script src="./js/edgelxe_misc.js"></script>

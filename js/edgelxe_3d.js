@@ -345,6 +345,52 @@ function render3D() {
 		);
 	});
 
+    // ---- 路点 ----
+    const selectedMovingId = (state.selectedElement && state.selectedElement.type === 'moving')
+        ? state.selectedElement.id : null;
+    state.movingPlatforms.forEach(mp => {
+        if (mp.id !== selectedMovingId && state.currentTool !== 'waypoint') return;
+        if (!mp.waypoints) return;
+        mp.waypoints.forEach((wp, idx) => {
+            const key = `waypoint:${mp.id}:${idx}`;
+            const isSel = state.selectedWaypoint &&
+                          state.selectedWaypoint.movingId === mp.id &&
+                          state.selectedWaypoint.idx === idx;
+            getOrCreateMesh(
+                key,
+                () => {
+                    const geo = new THREE.SphereGeometry(0.15, 12, 8);
+                    const mat = new THREE.MeshStandardMaterial({
+                        color: 0xffcc44,
+                        emissive: 0xff8800,
+                        emissiveIntensity: isSel ? 0.8 : 0.2
+                    });
+                    const mesh = new THREE.Mesh(geo, mat);
+                    return mesh;
+                },
+                (mesh) => {
+                    mesh.position.set(
+                        wp.x - centerX + 0.5,
+                        wp.z + 0.5,
+                        wp.y - centerZ + 0.5
+                    );
+                    mesh.material.emissiveIntensity = isSel ? 0.9 : 0.2;
+                    mesh.material.color.set(isSel ? 0xffffff : 0xffcc44);
+                },
+                { type: 'waypoint', id: `${mp.id}:${idx}` }
+            );
+        });
+        // 画连线
+        if (mp.waypoints.length > 1) {
+            const pts = mp.waypoints.map(w => new THREE.Vector3(
+                w.x - centerX + 0.5, w.z + 0.5, w.y - centerZ + 0.5));
+            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+            const line = new THREE.Line(geo, new THREE.LineBasicMaterial({color: 0xffcc44}));
+            threeScene.add(line);
+            threeObjects.push(line);
+        }
+    });
+
 	// ---- 掉落平台 ----
 	const fallingSize = blockSize - gap;
 	const fallingHeight = fallingSize * 0.1;
@@ -1243,9 +1289,6 @@ function render3D() {
 // 显示3D视图（并排）
 function show3D() {
 	const container = document.getElementById('view3dContainer');
-	const handle = document.getElementById('splitHandle');
-	// 隐藏分隔条（不再使用）
-	handle.style.display = 'none';
 	const width = parseInt(width3dSlider.value) || 50;
 	container.style.flex = `0 0 ${width}%`;
 	container.classList.add('active');
@@ -1261,10 +1304,8 @@ function show3D() {
 
 function hide3D() {
 	const container = document.getElementById('view3dContainer');
-	const handle = document.getElementById('splitHandle');
 	container.classList.remove('active');
 	container.style.flex = '0 0 0';
-	handle.style.display = 'none';
 	const canvasWrap = document.getElementById('canvasWrap');
 	canvasWrap.style.width = '100%';
 	setTimeout(() => {

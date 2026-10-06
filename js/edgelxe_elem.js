@@ -130,6 +130,8 @@ const state = {
 	canvasRange: { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 },
     _suppressUI: false,
     canvasEditMode: 'select',   // 'select' | 'add'
+    selectedWaypoint: null,  // { movingId, idx }
+    multiSelection: [],   // ← 新增
 };
 
 // 渲染节流
@@ -177,6 +179,8 @@ const fileXmlInput = document.getElementById('fileXmlInput');
  * @param {string|null} elemIdsStr - 元素 ID 列表的 JSON 字符串或 null
  */
 function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
+    // 多选工具交给 edgelxe_select.js
+    if (state.currentTool === 'multiselect') return;
     // ===== 添加模式：优先处理，任何工具都不弹选择框 =====
     if (state.canvasEditMode === 'add') {
         // 添加模式 + 橡皮擦：每次只删一个，优先删最后添加的
@@ -192,7 +196,7 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
                     updatePanel();
                     updateElemList();
                     updateStatus();
-                    saveCache();
+                    uniInterface();
                     return;
                 }
             }
@@ -207,7 +211,7 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
                         requestRender();
                         updatePanel();
                         updateStatus();
-                        saveCache();
+                        uniInterface();
                     }
                 }
             }
@@ -226,7 +230,7 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
                 layer[y][x] = { r: color.r, g: color.g, b: color.b };
                 requestRender();
                 updateStatus();
-                saveCache();
+                uniInterface();
             },
             'moving': () => placeMoving(x, y, z),
             'falling': () => placeFalling(x, y, z),
@@ -250,6 +254,38 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
     // ===== 非添加模式 =====
     if (state.currentTool === 'eraser') {
         handleEraserClick(x, y, z, staticCoord, elemIdsStr);
+        return;
+    }
+    
+    if (state.currentTool === 'waypoint') {
+        // 必须先选中移动平台
+        if (!state.selectedElement || state.selectedElement.type !== 'moving') {
+            showToast('请先选中一个移动平台');
+            return;
+        }
+        const m = state.movingPlatforms.find(p => p.id === state.selectedElement.id);
+        if (!m) return;
+
+        // ★ 用 getEntriesAt 直接查询当前格的路点
+        // （调用方传入的 elemIdsStr 已经被过滤掉了 waypoint）
+        const allEntries = (typeof getEntriesAt === 'function')
+            ? getEntriesAt(x, y, z)
+            : [];
+        const wpEntry = allEntries.find(e => e.type === 'waypoint' && e.data);
+
+        if (wpEntry) {
+            state.selectedWaypoint = {
+                movingId: wpEntry.data.parentId,
+                idx: wpEntry.data.idx
+            };
+            showToast(`选中路点 #${wpEntry.data.idx + 1}`);
+            requestRender();
+            updatePanel();
+            return;
+        }
+
+        // 否则在当前格添加新路点
+        addWaypointAt(m, x, y, z);
         return;
     }
 
@@ -347,6 +383,23 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
     }
 }
 
+function addWaypointAt(m, x, y, z) {
+    if (!m.waypoints) m.waypoints = [];
+    const keep = document.getElementById('keepPrevProps').checked;
+    let newWp = { x, y, z, travelTime: 0, pauseTime: 0 };
+    if (keep && m.waypoints.length > 0) {
+        const last = m.waypoints[m.waypoints.length - 1];
+        newWp.travelTime = last.travelTime ?? 0;
+        // 但 pauseTime 固定为 0
+        newWp.pauseTime = 0;
+    }
+    m.waypoints.push(newWp);
+    expandCanvasRangeForPoint(x, y, z);
+    uniInterface();
+    requestRender();
+    updatePanel();
+    showToast(`已添加路点 #${m.waypoints.length} (${x},${y},${z})`);
+}
 
 function setMovingPos(m, x, y, z) {
 	if (!m.waypoints || m.waypoints.length === 0) {
@@ -501,7 +554,7 @@ function applyLevel() {
 	if (threeScene) {
 		clear3DScene();
 	}
-	saveCache();
+	uniInterface();
 	syncLevelUI();
 	showToast('Level 属性已应用');
 }
@@ -524,6 +577,19 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 			}
 		}
 	}
+    // ---- 移动方块路点 ----
+    if (state.currentTool === 'eraser' && state.selectedWaypoint) {
+        const { movingId, idx } = state.selectedWaypoint;
+        const m = state.movingPlatforms.find(p => p.id === movingId);
+        if (m && m.waypoints && idx > 0 && idx < m.waypoints.length) {
+            m.waypoints.splice(idx, 1);
+            state.selectedWaypoint = null;
+            uniInterface();
+            requestRender();
+            updatePanel();
+            return;
+        }
+    }
 
 	// ---- 其他元素 ----
 	if (elemIdsStr) {
@@ -642,7 +708,7 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 				requestRender();
 				updatePanel();
 				updateStatus();
-				saveCache();
+				uniInterface();
 				showToast('已删除静态方块');
 			}
 		} else {
@@ -664,7 +730,7 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 					requestRender();
 					updatePanel();
 					updateStatus();
-					saveCache();
+					uniInterface();
 					showToast('已删除静态方块');
 				}
 			} else {
@@ -804,7 +870,7 @@ function deleteElement(type, id) {
 			updatePanel();
 			updateElemList();
 			updateStatus();
-			saveCache();
+			uniInterface();
 			showToast(`已删除子按钮 #${id}`);
 			return;
 		}
@@ -877,7 +943,7 @@ function deleteElement(type, id) {
 		updatePanel();
 		updateElemList();
 		updateStatus();
-		saveCache();
+		uniInterface();
 		showToast(`已删除 ${type} #${id}`);
 	}
 }
@@ -911,7 +977,7 @@ function toggleStaticBlock(x, y, z) {
 	updatePixelAt(x, y, z);
 	updatePanel();
 	updateStatus();
-	saveCache();
+	uniInterface();
 }
 
 function selectStatic(x, y, z) {
@@ -942,7 +1008,7 @@ function updateStaticRGB(x, y, z, r, g, b) {
 	}
 	requestRender();
 	updatePanel();
-	saveCache();
+	uniInterface();
 }
 
 function resetStaticColor(x, y, z) {
@@ -959,7 +1025,7 @@ function resetStaticColor(x, y, z) {
 	}
 	requestRender();
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已恢复默认颜色');
 }
 
@@ -977,61 +1043,74 @@ function checkExist(arr, x, y, z, msg, getPos) {
 
 // 放置各类元素
 function placeMoving(x, y, z) {
-	expandCanvasRangeForPoint(x, y, z);
+    expandCanvasRangeForPoint(x, y, z);
     if (checkExist(state.movingPlatforms, x, y, z, '该位置已有移动平台', getMovingPos)) return;
-	
-		// ===== 新增：保留上次属性 =====
-		const keep = document.getElementById('keepPrevProps').checked;
-		let baseProps = {};
-		if (keep && state.movingPlatforms.length > 0) {
-			const last = state.movingPlatforms[state.movingPlatforms.length - 1];
-			// 可保留的属性列表
-			const propsToKeep = ['autoStart', 'loopStartIndex', 'fullBlock', 'relatedTo', 'offset'];
-			propsToKeep.forEach(prop => {
-				if (prop in last) baseProps[prop] = last[prop];
-			});
-		}
-		// ===== 新增结束 =====
-	
-	const internalId = generateInternalId('M');
-	const autoName = document.getElementById('autoNameCheck').checked;
-	const newM = {
-		id: internalId,
-		xmlId: autoName ? generateUniqueXmlId(internalId) : '',
-		autoStart: true,
-		loopStartIndex: 0,// 可选，默认为1。指定当移动方块移动到最后一个路点后的下一个路点的索引（从1开始）。将该值设置为0可以使移动方块在移动到最后一个路点后停止移动。
-		fullBlock: true,
-		waypoints: [{ x, y, z, travelTime: 0, pauseTime: 0 }],
-		relatedTo: '',
-		offset: '',
-		...baseProps
-	};
-	if (x + 2 < state.level.size.w) {
-		newM.waypoints.push({ x: x + 2, y, z, travelTime: 30, pauseTime: 10 });
-	}
-	
-	// 统一运动处理
-	if (state.unifiedMovement.enabled && state.unifiedMovement.baseId) {
-		const base = state.movingPlatforms.find(m => (m.xmlId || m.id) === state.unifiedMovement.baseId);
-		if (base) {
-			const basePos = getMovingPos(base);
-			newM.relatedTo = state.unifiedMovement.baseId; // 使用 xmlId 或 id
-			newM.offset = `${x - basePos.x},${y - basePos.y},${z - basePos.z}`;
-			// 复制 AutoStart 和 LoopStartIndex
-			if (base.autoStart !== undefined) newM.autoStart = base.autoStart;
-			if (base.loopStartIndex !== undefined) newM.loopStartIndex = base.loopStartIndex;
-			// 可选：默认隐藏路点（由用户后续决定）
-			newM.hideWaypoints = true; // 可根据需求设为 true
-		}
-	}
-	
-	state.movingPlatforms.push(newM);
-	selectElement('moving', internalId);
-	requestRender();
-	updateElemList();
-	updateStatus();
-	saveCache();
-	showToast(`移动平台 #${internalId} 已放置`);
+
+    const keep = document.getElementById('keepPrevProps').checked;
+    const autoName = document.getElementById('autoNameCheck').checked;
+
+    // ★ 先决定路点：如果有上次可复用 → 直接生成完整 waypoints
+    let waypoints = null;
+    let baseProps = {};
+    if (keep && state.movingPlatforms.length > 0) {
+        const last = state.movingPlatforms[state.movingPlatforms.length - 1];
+        const propsToKeep = ['autoStart', 'loopStartIndex', 'fullBlock', 'relatedTo', 'offset'];
+        propsToKeep.forEach(prop => {
+            if (prop in last) baseProps[prop] = last[prop];
+        });
+        if (last.waypoints && last.waypoints.length > 0) {
+            const base = last.waypoints[0];
+            waypoints = last.waypoints.map(wp => ({
+                x: x + (wp.x - base.x),
+                y: y + (wp.y - base.y),
+                z: z + (wp.z - base.z),
+                travelTime: wp.travelTime || 0,
+                pauseTime: 0        // pauseTime 统一 0
+            }));
+        }
+    }
+
+    // ★ 没有可复用 → 默认结构
+    if (!waypoints) {
+        waypoints = [{ x, y, z, travelTime: 0, pauseTime: 0 }];
+        if (x + 2 < state.level.size.w) {
+            waypoints.push({ x: x + 2, y, z, travelTime: 30, pauseTime: 10 });
+        }
+    }
+
+    const internalId = generateInternalId('M');
+    const newM = {
+        id: internalId,
+        xmlId: autoName ? generateUniqueXmlId(internalId) : '',
+        autoStart: true,
+        loopStartIndex: 0,
+        fullBlock: true,
+        waypoints,            // ★ 一次性赋值完整数组
+        relatedTo: '',
+        offset: '',
+        ...baseProps
+    };
+
+    // 统一运动处理
+    if (state.unifiedMovement.enabled && state.unifiedMovement.baseId) {
+        const base = state.movingPlatforms.find(m => (m.xmlId || m.id) === state.unifiedMovement.baseId);
+        if (base) {
+            const basePos = getMovingPos(base);
+            newM.relatedTo = state.unifiedMovement.baseId;
+            newM.offset = `${x - basePos.x},${y - basePos.y},${z - basePos.z}`;
+            if (base.autoStart !== undefined) newM.autoStart = base.autoStart;
+            if (base.loopStartIndex !== undefined) newM.loopStartIndex = base.loopStartIndex;
+            newM.hideWaypoints = true;
+        }
+    }
+
+    state.movingPlatforms.push(newM);
+    selectElement('moving', internalId);
+    requestRender();
+    updateElemList();
+    updateStatus();
+    uniInterface();
+    showToast(`移动平台 #${internalId} 已放置`);
 }
 
 function placeFalling(x, y, z) {
@@ -1057,7 +1136,7 @@ function placeFalling(x, y, z) {
 	requestRender();
 	updateElemList();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast(`掉落平台 #${internalId} 已放置`);
 }
 
@@ -1082,7 +1161,7 @@ function placePrism(x, y, z) {
 	requestRender();
 	updateElemList();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast(`棱柱 #${internalId} 已放置`);
 }
 
@@ -1113,7 +1192,7 @@ function placeResizer(x, y, z, type) {
 	requestRender();
 	updateElemList();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast(`尺寸调整器 #${internalId} (${type}) 已放置`);
 }
 
@@ -1150,7 +1229,7 @@ function placeBumper(x, y, z) {
 	requestRender();
 	updateElemList();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast(`撞击器 #${internalId} 已放置`);
 }
 
@@ -1175,7 +1254,7 @@ function placeCheckpoint(x, y, z) {
 	requestRender();
 	updateElemList();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast(`存档点 #${internalId} 已放置`);
 }
 
@@ -1214,7 +1293,7 @@ function placeCameraTrigger(x, y, z) {
 	requestRender();
 	updateElemList();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast(`相机触发 #${internalId} 已放置`);
 }
 
@@ -1253,7 +1332,7 @@ function placeButton(x, y, z) {
 	requestRender();
 	updateElemList();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast(`按钮 #${internalId} 已放置`);
 }
 
@@ -1299,7 +1378,7 @@ function placeOtherCube(x, y, z) {
 	requestRender();
 	updateElemList();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast(`提示方块 #${internalId} 已放置`);
 }
 
@@ -1339,7 +1418,7 @@ function placeDarkCube(x, y, z) {
 	requestRender();
 	updateElemList();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast(`黑暗方块 #${internalId} 已放置`);
 }
 
@@ -1358,7 +1437,7 @@ function addButtonSequence() {
 	selectElement('buttonsequence', internalId);
 	updateElemList();
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast(`按钮序列 #${internalId} 已创建`);
 }
 
@@ -1379,7 +1458,7 @@ window.addButtonSequenceButton = function(parentId) {
 		movingPlatformID: ''
 	});
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已添加子按钮');
 };
 
@@ -1390,7 +1469,7 @@ window.removeButtonSequenceButton = function(parentId, idx) {
 	renderGrid();
 	updatePanel();
 	updateElemList();
-	saveCache();
+	uniInterface();
 	showToast('已删除子按钮');
 };
 
@@ -1404,7 +1483,7 @@ window.moveButtonSequenceButton = function(parentId, idx, delta) {
 	parent.buttons[idx] = parent.buttons[newIdx];
 	parent.buttons[newIdx] = tmp;
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已调整顺序');
 };
 
@@ -1446,7 +1525,7 @@ window.updateButtonSequenceButtonProp = function(parentId, idx, key, val) {
 	} else {
 		setField(btn, key, val);
 	}
-	saveCache();
+	uniInterface();
 	updatePanel();
 };
 
@@ -1458,7 +1537,7 @@ window.updateButtonSequenceButtonPos = function(parentId, idx, axis, val) {
 	btn.position[axis] = val;
 	btn.movingPlatformID = '';
 	expandCanvasRangeForPoint(btn.position.x, btn.position.y, btn.position.z);
-	saveCache();
+	uniInterface();
 	updatePanel();
 	requestRender();
 };
@@ -1495,7 +1574,7 @@ window.updateButtonSequenceButtonMovingPlatform = function(parentId, idx, val) {
 		btn.movingPlatformID = '';
 	}
 
-	saveCache();
+	uniInterface();
 	updatePanel();
 	requestRender();
 };
@@ -1510,7 +1589,7 @@ window.updateFallingPos = function(id, axis, val) {
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
 	requestRender();
 	updatePanel();
-	saveCache();
+	uniInterface();
 };
 
 window.updatePrismPos = function(id, axis, val) {
@@ -1522,7 +1601,7 @@ window.updatePrismPos = function(id, axis, val) {
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
 	requestRender();
 	updatePanel();
-	saveCache();
+	uniInterface();
 };
 
 window.updateResizerPos = function(id, axis, val) {
@@ -1534,7 +1613,7 @@ window.updateResizerPos = function(id, axis, val) {
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
 	requestRender();
 	updatePanel();
-	saveCache();
+	uniInterface();
 };
 
 window.updateBumperPos = function(id, axis, val) {
@@ -1546,7 +1625,7 @@ window.updateBumperPos = function(id, axis, val) {
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
 	requestRender();
 	updatePanel();
-	saveCache();
+	uniInterface();
 };
 
 window.updateCheckpointPos = function(id, axis, val) {
@@ -1558,7 +1637,7 @@ window.updateCheckpointPos = function(id, axis, val) {
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
 	requestRender();
 	updatePanel();
-	saveCache();
+	uniInterface();
 };
 
 window.updateCameraTriggerPos = function(id, axis, val) {
@@ -1570,7 +1649,7 @@ window.updateCameraTriggerPos = function(id, axis, val) {
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
 	requestRender();
 	updatePanel();
-	saveCache();
+	uniInterface();
 };
 
 window.updateButtonPos = function(id, axis, val) {
@@ -1584,7 +1663,7 @@ window.updateButtonPos = function(id, axis, val) {
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
 	requestRender();
 	updatePanel();
-	saveCache();
+	uniInterface();
 };
 
 // ===== OtherCube 子元素辅助函数 =====
@@ -1599,7 +1678,7 @@ window.addOtherCubeSubMP = function(parentId) {
 		// waypoints 将由父元素自动生成，我们不需要存储，仅保存基本属性
 	});
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已添加子 MovingPlatform');
 };
 window.removeOtherCubeSubMP = function(parentId, idx) {
@@ -1607,14 +1686,14 @@ window.removeOtherCubeSubMP = function(parentId, idx) {
 	if (!parent || !parent.subMovingPlatforms) return;
 	parent.subMovingPlatforms.splice(idx, 1);
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已删除子 MovingPlatform');
 };
 window.updateOtherCubeSubMPProp = function(parentId, idx, key, val) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent || !parent.subMovingPlatforms || idx >= parent.subMovingPlatforms.length) return;
 	setField(parent.subMovingPlatforms[idx], key, val);
-	saveCache();
+	uniInterface();
 };
 
 window.addOtherCubeSubButton = function(parentId) {
@@ -1631,7 +1710,7 @@ window.addOtherCubeSubButton = function(parentId) {
 		affectButtons: ''
 	});
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已添加子 Button');
 };
 window.removeOtherCubeSubButton = function(parentId, idx) {
@@ -1639,14 +1718,14 @@ window.removeOtherCubeSubButton = function(parentId, idx) {
 	if (!parent || !parent.subButtons) return;
 	parent.subButtons.splice(idx, 1);
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已删除子 Button');
 };
 window.updateOtherCubeSubButtonProp = function(parentId, idx, key, val) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent || !parent.subButtons || idx >= parent.subButtons.length) return;
 	setField(parent.subButtons[idx], key, val);
-	saveCache();
+	uniInterface();
 };
 window.updateOtherCubeSubButtonChecklist = function(parentId, idx, field, checkId, checked) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
@@ -1659,7 +1738,7 @@ window.updateOtherCubeSubButtonChecklist = function(parentId, idx, field, checkI
 		list = list.filter(s => s !== checkId);
 	}
 	btn[field] = list.join(',');
-	saveCache();
+	uniInterface();
 };
 
 window.clearKeyEvents = function(id, type) {
@@ -1673,7 +1752,7 @@ window.clearKeyEvents = function(id, type) {
     }
     if (!confirm('确定要清空所有按键事件吗？')) return;
     target.keyEvents = [];
-    saveCache();
+    uniInterface();
     updatePanel();
     showToast('已清空按键事件');
 };
@@ -1684,7 +1763,7 @@ window.addOtherCubeKeyEvent = function(parentId) {
 	if (!parent.keyEvents) parent.keyEvents = [];
 	parent.keyEvents.push({ dir: 'West', type: 'Down', timeOffset: 0 });
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已添加按键事件');
 };
 window.removeOtherCubeKeyEvent = function(parentId, idx) {
@@ -1692,14 +1771,14 @@ window.removeOtherCubeKeyEvent = function(parentId, idx) {
 	if (!parent || !parent.keyEvents) return;
 	parent.keyEvents.splice(idx, 1);
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已删除按键事件');
 };
 window.updateOtherCubeKeyEventProp = function(parentId, idx, key, val) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent || !parent.keyEvents || idx >= parent.keyEvents.length) return;
 	setField(parent.keyEvents[idx], key, val);
-	saveCache();
+	uniInterface();
 };
 
 // ===== DarkCube 子元素辅助函数 =====
@@ -1709,7 +1788,7 @@ window.addDarkCubeKeyEvent = function(parentId) {
 	if (!parent.keyEvents) parent.keyEvents = [];
 	parent.keyEvents.push({ dir: 'West', type: 'Down', timeOffset: 0 });
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已添加按键事件');
 };
 window.removeDarkCubeKeyEvent = function(parentId, idx) {
@@ -1717,14 +1796,14 @@ window.removeDarkCubeKeyEvent = function(parentId, idx) {
 	if (!parent || !parent.keyEvents) return;
 	parent.keyEvents.splice(idx, 1);
 	updatePanel();
-	saveCache();
+	uniInterface();
 	showToast('已删除按键事件');
 };
 window.updateDarkCubeKeyEventProp = function(parentId, idx, key, val) {
 	const parent = state.darkCubes.find(o => o.id === parentId);
 	if (!parent || !parent.keyEvents || idx >= parent.keyEvents.length) return;
 	setField(parent.keyEvents[idx], key, val);
-	saveCache();
+	uniInterface();
 };
 
 
@@ -1748,7 +1827,7 @@ window.updateMovingProp = function(id, key, val) {
 	requestRender();
 	updatePanel();
 	updateElemList();
-	saveCache();
+	uniInterface();
 };
 
 window.updateMovingPos = function(id, axis, val) {
@@ -1760,7 +1839,7 @@ window.updateMovingPos = function(id, axis, val) {
 	expandCanvasRangeForPoint(pos.x, pos.y, pos.z);
 	requestRender();
 	updatePanel();
-	saveCache();
+	uniInterface();
 };
 
 window.updateWaypoint = function(id, idx, key, val) {
@@ -1776,28 +1855,27 @@ window.updateWaypoint = function(id, idx, key, val) {
 	expandCanvasRangeForPoint(wp.x, wp.y, wp.z);
 	updatePanel();
 	requestRender();
-	saveCache();
+	uniInterface();
 };
 
 window.addWaypoint = function(id) {
-	const m = state.movingPlatforms.find(p => p.id === id);
-	if (!m) return;
-	if (!m.waypoints) m.waypoints = [];
-	const last = m.waypoints.length > 0 ? m.waypoints[m.waypoints.length - 1] : { x: 0, y: 0, z: 0 };
-	const newWp = {
-		x: Math.min(last.x + 1, state.level.size.w - 1),
-		y: last.y,
-		z: last.z,
-		travelTime: 30,
-		pauseTime: 10
-	};
-	m.waypoints.push(newWp);
-	// 扩展画布范围以包含新路点
-	expandCanvasRangeForPoint(newWp.x, newWp.y, newWp.z);
-	updatePanel();
-	requestRender();
-	saveCache();
-	showToast('已添加路点');
+    const m = state.movingPlatforms.find(p => p.id === id);
+    if (!m) return;
+    if (!m.waypoints) m.waypoints = [];
+    const keep = document.getElementById('keepPrevProps').checked;
+    const last = m.waypoints[m.waypoints.length - 1] || { x: 0, y: 0, z: 0, travelTime: 30 };
+    const newWp = {
+        x: Math.min(last.x + 1, state.level.size.w - 1),
+        y: last.y, z: last.z,
+        travelTime: keep ? (last.travelTime ?? 30) : 30,
+        pauseTime: keep ? (last.pauseTime ?? 0) : 0,
+    };
+    m.waypoints.push(newWp);
+    expandCanvasRangeForPoint(newWp.x, newWp.y, newWp.z);
+    updatePanel();
+    requestRender();
+    uniInterface();
+    showToast('已添加路点');
 };
 
 window.removeWaypoint = function(id, idx) {
@@ -1807,7 +1885,7 @@ window.removeWaypoint = function(id, idx) {
 	m.waypoints.splice(idx, 1);
 	updatePanel();
 	requestRender();
-	saveCache();
+	uniInterface();
 	showToast('已删除路点');
 };
 
@@ -1816,7 +1894,7 @@ window.updateFallingProp = function(id, key, val) {
 	const m = state.fallingPlatforms.find(p => p.id === id);
 	if (m) {
 		setField(m, key, val);
-		saveCache();
+		uniInterface();
 		requestRender();
 		updatePanel();
 	}
@@ -1825,7 +1903,7 @@ window.updatePrismProp = function(id, key, val) {
 	const m = state.prisms.find(p => p.id === id);
 	if (m) {
 		setField(m, key, val);
-		saveCache();
+		uniInterface();
 		requestRender();
 		updatePanel();
 	}
@@ -1834,7 +1912,7 @@ window.updateResizerProp = function(id, key, val) {
 	const m = state.resizers.find(p => p.id === id);
 	if (m) {
 		setField(m, key, val);
-		saveCache();
+		uniInterface();
 		requestRender();
 		updatePanel();
 	}
@@ -1843,7 +1921,7 @@ window.updateBumperProp = function(id, key, val) {
 	const m = state.bumpers.find(p => p.id === id);
 	if (m) {
 		setField(m, key, val);
-		saveCache();
+		uniInterface();
 		requestRender();
 		updatePanel();
 	}
@@ -1852,7 +1930,7 @@ window.updateBumperDirEnabled = function(id, dir, enabled) {
 	const m = state.bumpers.find(p => p.id === id);
 	if (m && m[dir]) {
 		m[dir].enabled = enabled;
-		saveCache();
+		uniInterface();
 		requestRender();
 		updatePanel();
 	}
@@ -1860,7 +1938,7 @@ window.updateBumperDirEnabled = function(id, dir, enabled) {
 window.updateBumperDir = function(id, dir, key, val) {
 	const m = state.bumpers.find(p => p.id === id);
 	if (m && m[dir]) { m[dir][key] = val;
-		saveCache();
+		uniInterface();
 		requestRender();
 		updatePanel(); }
 };
@@ -1868,7 +1946,7 @@ window.updateCheckpointProp = function(id, key, val) {
 	const m = state.checkpoints.find(p => p.id === id);
 	if (m) {
 		setField(m, key, val);
-		saveCache();
+		uniInterface();
 		requestRender();
 		updatePanel();
 	}
@@ -1877,7 +1955,7 @@ window.updateCameraTriggerProp = function(id, key, val) {
 	const m = state.cameraTriggers.find(p => p.id === id);
 	if (m) {
 		setField(m, key, val);
-		saveCache();
+		uniInterface();
 		requestRender();
 		updatePanel();
 	}
@@ -1921,7 +1999,7 @@ window.updateButtonProp = function(id, key, val) {
         setField(m, key, val);
     }
 
-    saveCache();
+    uniInterface();
     requestRender();
     updatePanel();
 };
@@ -1954,7 +2032,7 @@ window.updateButtonChecklist = function(id, field, checkId, checked) {
         items.push(...newItems);
     }
     elem[field] = items.join(',');
-    saveCache();
+    uniInterface();
     updatePanel();
 };
 
@@ -1983,7 +2061,7 @@ window.updateButtonSeqChecklist = function(id, field, checkId, checked) {
         items.push(...newItems);
     }
     seq[field] = items.join(',');
-    saveCache();
+    uniInterface();
     updatePanel();
 };
 
@@ -1992,7 +2070,7 @@ window.updateButtonSeqProp = function(id, key, val) {
 	const seq = state.buttonSequences.find(b => b.id === id);
 	if (!seq) return;
 	setField(seq, key, val);
-	saveCache();
+	uniInterface();
 	updatePanel();
 };
 
@@ -2017,7 +2095,7 @@ window.updateButtonAffectData = function(btnId, field, checkId, value) {
         filteredItems.push(checkId);
     }
     btn[field] = filteredItems.join(',');
-    saveCache();
+    uniInterface();
     updatePanel();
 };
 
@@ -2039,7 +2117,7 @@ window.updateButtonSeqAffectData = function(seqId, field, checkId, value) {
         filteredItems.push(checkId);
     }
     seq[field] = filteredItems.join(',');
-    saveCache();
+    uniInterface();
     updatePanel();
 };
 // OtherCube / DarkCube 更新
@@ -2052,7 +2130,7 @@ window.updateOtherCubeProp = function(id, key, val) {
 			expandCanvasRangeForPoint(m.triggerX, m.triggerY, m.triggerZ);
 			expandCanvasRangeForPoint(m.cubeX, m.cubeY, m.cubeZ);
 		}
-		saveCache();
+		uniInterface();
 		requestRender();
 		updatePanel();
 	}
@@ -2066,7 +2144,7 @@ window.updateDarkCubeProp = function(id, key, val) {
 			expandCanvasRangeForPoint(m.triggerX, m.triggerY, m.triggerZ);
 			expandCanvasRangeForPoint(m.cubeX, m.cubeY, m.cubeZ);
 		}
-		saveCache();
+		uniInterface();
 		requestRender();
 		updatePanel();
 	}
@@ -2101,7 +2179,7 @@ window.updateInternalId = function(internalId, type, newId) {
 		}
 		elem.xmlId = xmlCandidate;
 	}
-	saveCache();
+	uniInterface();
 	updatePanel();
 	requestRender();
 	showToast('编号已更新');
@@ -2119,9 +2197,18 @@ window.removeStatic = function(x, y, z) {
 		requestRender();
 		updatePanel();
 		updateStatus();
-		saveCache();
+		uniInterface();
 		showToast('已删除静态方块');
 	}
 };
 
 window.resetStaticColor = resetStaticColor;
+
+window.moveWaypoint = function(movingId, idx, delta) {
+    const m = state.movingPlatforms.find(p => p.id === movingId);
+    if (!m || idx < 1 || idx >= m.waypoints.length) return;
+    const newIdx = idx + delta;
+    if (newIdx < 1 || newIdx >= m.waypoints.length) return;
+    [m.waypoints[idx], m.waypoints[newIdx]] = [m.waypoints[newIdx], m.waypoints[idx]];
+    uniInterface(); requestRender(); updatePanel(); showToast('路点顺序已调整');
+};

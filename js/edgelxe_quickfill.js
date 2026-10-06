@@ -784,7 +784,7 @@ function qfExecute() {
     updatePanel();
     updateElemList();
     updateStatus();
-    saveCache();
+    uniInterface();
     if (!qf.keepCoordsAfter) qfClearCoords();
     showToast(`${isEraser ? '删除' : '填充'}完成：${count} 个位置`);
 }
@@ -1076,7 +1076,7 @@ function doPaste() {
     updatePanel();
     updateElemList();
     updateStatus();
-    saveCache();
+    uniInterface();
     if (!cb.keepCoordsAfter) {
         cb.pasteCoord = null;
         refreshCbPasteInfo();
@@ -1465,6 +1465,31 @@ function bindEvents() {
                 }
             }
         }, true);
+        
+        canvas.addEventListener('touchend', (e) => {
+            if (qf.recordActive && activeTab === 'fill') {
+                e.stopImmediatePropagation(); e.preventDefault();
+                const t = e.changedTouches[0];
+                const real = getCanvasGridFromEvent({ clientX: t.clientX, clientY: t.clientY });
+                if (!real) return;
+                qfAddCoord(real.x, real.y, state.currentLayer);
+                return;
+            }
+            if (cb.recordMode && activeTab === 'clip') {
+                e.stopImmediatePropagation(); e.preventDefault();
+                const t = e.changedTouches[0];
+                const real = getCanvasGridFromEvent({ clientX: t.clientX, clientY: t.clientY });
+                if (!real) return;
+                if (cb.recordMode === 'copy') cbAddCopyCoord(real.x, real.y, state.currentLayer);
+                else if (cb.recordMode === 'paste') {
+                    cb.pasteCoord = { x: real.x, y: real.y, z: state.currentLayer };
+                    cb.recordMode = null;
+                    updateRecordBtns();
+                    refreshCbPasteInfo();
+                    showToast('粘贴目标已确定');
+                }
+            }
+        }, { passive: false, capture: true });
 
         canvas.addEventListener('mousemove', (e) => {
             const real = getCanvasGridFromEvent(e);
@@ -1593,13 +1618,80 @@ window.QuickFill = {
             minX: b.minX, minY: b.minY, minZ: b.minZ,
             maxX: b.maxX, maxY: b.maxY, maxZ: b.maxZ
         };
-    }
+    },
+    
+    // ---- 给多选用的复制/粘贴接口 ----
+    setCopyBox(minX, minY, minZ, maxX, maxY, maxZ) {
+        cb.copyCoords.length = 0;
+        cb.copyCoords.push({ x: minX, y: minY, z: minZ });
+        cb.copyCoords.push({ x: maxX, y: maxY, z: maxZ });
+        refreshCbCopyList();
+    },
+    setPasteCoord(x, y, z) {
+        cb.pasteCoord = { x, y, z };
+        refreshCbPasteInfo();
+    },
+    doCopy,
+    doPaste,
+    getClipboardInfo() {
+        if (!cb.clipboard) return null;
+        return {
+            blocks: cb.clipboard.blocks.length,
+            elements: cb.clipboard.elements.length
+        };
+    },
 };
 
 // 兼容旧代码：如果 3D 里还在调 window.Clipboard
 window.Clipboard = {
     toggle() { window.QuickFill.toggle(); switchTab('clip'); },
     open()   { window.QuickFill.open(); switchTab('clip'); }
+};
+
+// 多选复制：计算包围盒 → 喂给 QuickFill → doCopy
+window.batchCopyToClipboard = function () {
+    if (!state.multiSelection.length) { showToast('未选中任何元素'); return; }
+    if (!window.QuickFill || !window.QuickFill.setCopyBox || !window.QuickFill.doCopy) {
+        showToast('QuickFill 未加载'); return;
+    }
+
+    // 计算包围盒（空格子也计入）
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    state.multiSelection.forEach(it => {
+        let p = null;
+        if (it.coord) p = it.coord;                            // static / empty
+        else if (typeof getElementCoord === 'function') p = getElementCoord(it.type, it.id);
+        if (!p) return;
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+        if (p.z < minZ) minZ = p.z;
+        if (p.z > maxZ) maxZ = p.z;
+    });
+    if (!isFinite(minX)) { showToast('无法计算包围盒'); return; }
+
+    window.QuickFill.setCopyBox(minX, minY, minZ, maxX, maxY, maxZ);
+    window.QuickFill.doCopy();
+    showSelectionPanel();   // 刷新剪贴板信息
+};
+
+// 多选粘贴：从输入框读 X/Y/Z → 喂给 QuickFill → doPaste
+window.batchPasteAtInput = function () {
+    if (!window.QuickFill || !window.QuickFill.setPasteCoord || !window.QuickFill.doPaste) {
+        showToast('QuickFill 未加载'); return;
+    }
+    const x = parseInt(document.getElementById('batchPasteX')?.value);
+    const y = parseInt(document.getElementById('batchPasteY')?.value);
+    const z = parseInt(document.getElementById('batchPasteZ')?.value);
+    if (isNaN(x) || isNaN(y) || isNaN(z)) {
+        showToast('请填写完整的 X/Y/Z');
+        return;
+    }
+    window.QuickFill.setPasteCoord(x, y, z);
+    window.QuickFill.doPaste();
+    showSelectionPanel();
 };
 
 if (document.readyState === 'loading') {

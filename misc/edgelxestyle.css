@@ -53,7 +53,8 @@ body {
     height: 28px;
     background: #2a3a5a;
 }
-.toolbar button {
+.toolbar button,
+.toolbar a {
     background: #0f3460;
     border: 1px solid #1a4a7a;
     color: #eee;
@@ -62,11 +63,17 @@ body {
     cursor: pointer;
     font-size: 12px;
     transition: 0.2s;
+    text-decoration: none;   /* ★ a 标签需要去掉下划线 */
+    display: inline-flex;    /* 让文字垂直居中，跟 button 高度一致 */
+    align-items: center;
+    box-sizing: border-box;
 }
-.toolbar button:hover {
+.toolbar button:hover,
+.toolbar a:hover {
     background: #1a4a7a;
 }
-.toolbar button.active {
+.toolbar button.active,
+.toolbar a.active {
     background: #4fc3f7;
     color: #0a0a1a;
     border-color: #4fc3f7;
@@ -910,23 +917,6 @@ font-size: 10px;
 	align-items: center;
 	gap: 4px;
 }
-
-/* 分隔条样式 */
-.split-handle {
-	flex: 0 0 4px;
-	background: #2a3a5a;
-	cursor: col-resize;
-	position: relative;
-	z-index: 10;
-	display: none;
-	transition: background 0.2s;
-}
-.split-handle:hover {
-	background: #4a8aba;
-}
-.split-handle.active {
-	background: #4fc3f7;
-}
 /* 3D容器默认隐藏 */
 .view3d-container {
 	flex: 0 0 0;
@@ -936,9 +926,6 @@ font-size: 10px;
 .view3d-container.active {
 	flex: 0 0 50%;
 	display: flex;
-}
-.split-handle.active + .view3d-container {
-	flex: 0 0 50%;
 }
 #canvasWrap::-webkit-scrollbar {
 width: 12px;

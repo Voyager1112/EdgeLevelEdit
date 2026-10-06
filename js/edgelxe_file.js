@@ -927,7 +927,7 @@ function loadXMLAndPNG(files) {
 			updatePanel();
 			updateElemList();
 			updateStatus();
-			saveCache();
+			uniInterface();
 			showToast(`XML加载成功`);
 
 			// PNG 加载逻辑（同之前）
@@ -995,7 +995,7 @@ function loadXMLAndPNG(files) {
 						if (loadedCount === totalLayers) {
 							requestRender();
 							updateStatus();
-							saveCache();
+							uniInterface();
 							showToast(`已导入 ${totalLayers} 层PNG (匹配基准: ${xmlBaseName})`);
 						}
 					};

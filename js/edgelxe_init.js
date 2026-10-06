@@ -102,7 +102,6 @@ function init() {
 	updateElemList();
 	updateStatus();
 
-	document.getElementById('applyLevelBtn').addEventListener('click', applyLevel);
 	document.getElementById('toolStatic').addEventListener('click', () => setTool('static'));
 	document.getElementById('toolMoving').addEventListener('click', () => setTool('moving'));
 	document.getElementById('toolFalling').addEventListener('click', () => setTool('falling'));
@@ -1190,6 +1189,24 @@ B 通道（模型高度）
 			} catch (e) {}
 		});
 	})();
+    
+    (function enableLiveLevelProps() {
+        const area = document.getElementById('levelPropsArea');
+        if (!area) return;
+        const applyLive = (() => {
+            let t = null;
+            return () => {
+                clearTimeout(t);
+                t = setTimeout(() => {
+                    try { applyLevel(); } catch (e) { /* 忽略中间态 */ }
+                }, 150);
+            };
+        })();
+        area.querySelectorAll('input').forEach(el => {
+            const isSize = ['sizeW','sizeL','sizeH'].includes(el.id);
+            el.addEventListener(isSize ? 'change' : 'input', applyLive);
+        });
+    })();
 
 	state._lastSavedSnapshot = _serializeHistory();
     state._undoStack = [];
@@ -1215,6 +1232,28 @@ B 通道（模型高度）
         setCanvasEditMode(this.checked ? 'add' : 'select');
     });
     
+    document.getElementById('toolWaypoint').addEventListener('click', () => setTool('waypoint'));
+
+    const pmBtn = document.getElementById('projectManagerBtn');
+    if (pmBtn) pmBtn.addEventListener('click', () => window.PM.open());
+    
+    document.getElementById('toolMultiSelect').addEventListener('click', () => {
+        setTool('multiselect');
+        // 可选：清空之前的选择
+        state.multiSelection = [];
+        requestRender();
+    });
+
+    // 如果 edgelxe_select.js 提供了初始化函数
+    if (typeof initMultiSelect === 'function') initMultiSelect();
+    
+    document.getElementById('toolMultiSelect').addEventListener('click', () => {
+        setTool('multiselect');
+        state.multiSelection = [];
+        document.getElementById('msEmptyLabel').hidden = false;
+        requestRender();
+    });
+
 	fixFormFieldAssociations(document);
 	setInteractionMode('preview');
 	showToast('Edge 关卡xml编辑器3D 已启动');

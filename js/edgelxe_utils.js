@@ -329,7 +329,7 @@ function clearLayer() {
 	requestRender();
 	updatePanel();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast(`第 ${z} 层已清空`);
 }
 
@@ -398,6 +398,14 @@ function getLayerRange() {
 }
 
 function setTool(tool) {
+    // ★ 切换到非多选工具时，清空多选
+    if (tool !== 'multiselect' && state.multiSelection && state.multiSelection.length) {
+        state.multiSelection = [];
+    }
+    if (tool !== 'multiselect') {
+        const el = document.getElementById('msEmptyLabel');
+        if (el) el.hidden = true;
+    }
 	state.currentTool = tool;
 	// 清除所有工具栏按钮的高亮
 	document.querySelectorAll('.toolbar button[id^="tool"]:not(#toolSingle):not(#toolBrush)').forEach(b => b.classList.remove('active'));
@@ -407,6 +415,7 @@ function setTool(tool) {
 	const btnMap = {
 		static: 'toolStatic',
 		moving: 'toolMoving',
+        waypoint: 'toolWaypoint',
 		falling: 'toolFalling',
 		prism: 'toolPrism',
 		resizerGrow: 'toolResizerGrow',
@@ -418,7 +427,8 @@ function setTool(tool) {
 		seqbutton: 'toolSeqButton',
 		othercube: 'toolOtherCube',
 		darkcube: 'toolDarkCube',
-		eraser: 'toolEraser'
+		eraser: 'toolEraser',
+        multiselect: 'toolMultiSelect',
 	};
 	const id = btnMap[tool];
 	if (id) {

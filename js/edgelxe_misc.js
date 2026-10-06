@@ -61,7 +61,7 @@ window.updateElementId = function(type, oldId, newId) {
 	requestRender();
 	updatePanel();
 	updateElemList();
-	saveCache();
+	uniInterface();
 	showToast('编号已更新');
 };
 
@@ -113,7 +113,7 @@ visibilityTypes.forEach(type => {
 	cb.addEventListener('change', function() {
 		state.visibility[type.key] = this.checked;
 		requestRender();
-		saveCache();
+		uniInterface();
 	});
 	label.appendChild(cb);
 	label.appendChild(document.createTextNode(type.label));
@@ -319,7 +319,7 @@ function newProject() {
 	updateElemList();
 	refreshUnifiedBaseList();
 	updateStatus();
-	saveCache();
+	uniInterface();
 	showToast('已新建空项目');
 }
 
@@ -638,7 +638,7 @@ window.updateXmlId = function(internalId, type, newId) {
 	requestRender();
 	updatePanel();
 	updateElemList();
-	saveCache();
+	uniInterface();
 	showToast('ID已更新');
 };
 
@@ -657,7 +657,7 @@ window.syncXmlId = function(internalId, type) {
 	requestRender();
 	updatePanel();
 	updateElemList();
-	saveCache();
+	uniInterface();
 	showToast('已同步ID');
 };
 
@@ -685,7 +685,7 @@ window.updateButtonSequenceButtonXmlId = function(parentId, idx, newId) {
 		btn.xmlId = '';
 	}
 	requestRender();
-	saveCache();
+	uniInterface();
 	updatePanel();
 	showToast('ID已更新');
 };
@@ -703,7 +703,7 @@ window.syncButtonSequenceButtonXmlId = function(parentId, idx) {
 		candidate = val + 'a'.repeat(counter);
 	}
 	btn.xmlId = candidate;
-	saveCache();
+	uniInterface();
 	updatePanel();
 	showToast('已同步ID');
 };
@@ -747,7 +747,7 @@ function placeSequenceButton(x, y, z) {
 	updatePanel();
 	updateElemList();
 	requestRender();
-	saveCache();
+	uniInterface();
 	showToast(`已在序列 #${seqId} 添加子按钮`);
 }
 function openSequenceEditor(seqId) {
@@ -820,7 +820,7 @@ function moveSeqButton(seqId, idx, delta) {
 	[parent.buttons[idx], parent.buttons[newIdx]] = [parent.buttons[newIdx], parent.buttons[idx]];
 	renderSeqEditorList(seqId);
 	updatePanel();
-	saveCache();
+	uniInterface();
 }
 
 function removeSeqButton(seqId, idx) {
@@ -829,7 +829,7 @@ function removeSeqButton(seqId, idx) {
 	parent.buttons.splice(idx, 1);
 	renderSeqEditorList(seqId);
 	updatePanel();
-	saveCache();
+	uniInterface();
 }
 
 function updateSeqButtonProp(seqId, idx, key, val) {
@@ -838,7 +838,7 @@ function updateSeqButtonProp(seqId, idx, key, val) {
     const btn = parent.buttons[idx];
     if (key === 'visible') btn.visible = val;
     else setField(btn, key, val);
-    saveCache();
+    uniInterface();
 }
 
 function unbindSeqButton(seqId, btnId) {
@@ -871,7 +871,7 @@ function unbindSeqButton(seqId, btnId) {
 	updatePanel();
 	updateElemList();
 	requestRender();
-	saveCache();
+	uniInterface();
 	showToast('已解绑为普通按钮');
 }
 
@@ -1067,6 +1067,12 @@ function onPointerUp(event) {
                 const { elem, mesh } = hit;
                 if (elem.type === 'static') {
                     selectStatic(elem.coord.x, elem.coord.y, elem.coord.z);
+                } else if (elem.type === 'waypoint') {
+                    const [movingId, idxStr] = elem.id.split(':');
+                    state.selectedWaypoint = { movingId, idx: parseInt(idxStr, 10) };
+                    showToast(`选中路点 #${idxStr}`);
+                    render3D();
+                    return;
                 } else {
                     selectElement(elem.type, elem.id);
                 }
@@ -1178,6 +1184,14 @@ function placeElementAt(tool, x, y, z) {
     const map = {
         'static': () => toggleStaticBlock(x, y, z),
         'moving': () => placeMoving(x, y, z),
+        'waypoint': () => {
+            if (!state.selectedElement || state.selectedElement.type !== 'moving') {
+                showToast('请先选中一个移动平台');
+                return;
+            }
+            const m = state.movingPlatforms.find(p => p.id === state.selectedElement.id);
+            if (m) addWaypointAt(m, x, y, z);
+        },
         'falling': () => placeFalling(x, y, z),
         'prism': () => placePrism(x, y, z),
         'resizerGrow': () => placeResizer(x, y, z, 'grow'),
@@ -1250,7 +1264,7 @@ window.getLevelXmlString = generateXMLString;
 
 
 const compileDialog = document.getElementById('compileDialog');
-const compileCurrentBtn = document.getElementById('compileCurrentBtn');
+const importCurrentBtn = document.getElementById('importCurrentBtn');
 const closeCompileDialogBtn = document.getElementById('closeCompileDialogBtn');
 const compileLog = document.getElementById('compileLog');
 const compileDownloadArea = document.getElementById('compileDownloadArea');
@@ -1301,6 +1315,14 @@ function parseCompileXmlTheme(file) {
                     }
                 }
                 addCompileLog('info', `已从 XML 解析主题: ${theme}`);
+            }
+
+            // ---- 自动填入文件名（去掉扩展名，方便编辑） ----
+            const customInput = document.getElementById('compileCustomName');
+            if (customInput && file && file.name) {
+                const baseName = file.name.replace(/\.[^.]+$/, '');
+                customInput.value = baseName;
+                addCompileLog('info', `已自动填入文件名: ${baseName}`);
             }
         } catch (e) {
             addCompileLog('warn', '解析 XML 主题失败: ' + e.message);
@@ -1463,6 +1485,81 @@ document.getElementById('compileImportBtn').addEventListener('click', async () =
     }
 });
 
+// ===== 编译对话框拖放支持 =====
+(function initCompileDialogDropZone() {
+    if (!compileDialog) return;
+    ['dragover', 'drop'].forEach(evt => {
+        compileDialog.addEventListener(evt, e => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (evt === 'dragover') {
+                e.dataTransfer.dropEffect = 'copy';
+                return;
+            }
+            const files = Array.from(e.dataTransfer.files);
+            if (!files.length) return;
+            handleCompileDropFiles(files);
+        });
+    });
+})();
+
+async function handleCompileDropFiles(files) {
+    // ---- 单个 ZIP ----
+    if (files.length === 1 && files[0].name.toLowerCase().endsWith('.zip')) {
+        const dt = new DataTransfer();
+        dt.items.add(files[0]);
+        const xmlInput = document.getElementById('compileXmlInput');
+        xmlInput.files = dt.files;
+        xmlInput.dispatchEvent(new Event('change'));
+        addCompileLog('info', `已拖入 ZIP: ${files[0].name}`);
+        return;
+    }
+
+    // ---- 多文件 ----
+    const xmls = files.filter(f => f.name.toLowerCase().endsWith('.xml'));
+    const pngs = files.filter(f => f.name.toLowerCase().endsWith('.png'));
+    const bins = files.filter(f => f.name.toLowerCase().endsWith('.bin'));
+
+    if (xmls.length) {
+        const dt = new DataTransfer();
+        xmls.forEach(f => dt.items.add(f));
+        const xmlInput = document.getElementById('compileXmlInput');
+        xmlInput.files = dt.files;
+        xmlInput.dispatchEvent(new Event('change'));
+        addCompileLog('info', `已拖入 ${xmls.length} 个 XML`);
+    }
+    if (pngs.length) {
+        const dt = new DataTransfer();
+        pngs.forEach(f => dt.items.add(f));
+        document.getElementById('compilePngInput').files = dt.files;
+        addCompileLog('info', `已拖入 ${pngs.length} 个 PNG`);
+    }
+    if (bins.length) {
+        // 反编译路径：复用现有的 _selectedBinFile
+        if (typeof _selectedBinFile !== 'undefined') {
+            window._selectedBinFile = bins[0];
+            // _selectedBinFile 是模块级变量，如果在别的脚本里，需要用 window
+        }
+        // 更简单：直接用 readAsArrayBuffer 走一遍
+        const file = bins[0];
+        const reader = new FileReader();
+        reader.onload = ev => {
+            try {
+                const staticMovingToPng =
+                    document.getElementById('decompileStaticMovingToPng')?.checked || false;
+                const result = decompileBin(ev.target.result, file.name.replace(/\.[^.]+$/, ''), { staticMovingToPng });
+                const pngCount = Object.keys(result.pngs).length;
+                safeLog('ok', `反编译成功: ${file.name} → XML + ${pngCount} 个 PNG 层`);
+                showDecompileButtons(result, file.name.replace(/\.[^.]+$/, ''));
+            } catch (err) {
+                safeLog('err', `反编译失败: ${err.message}`);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+        addCompileLog('info', `已拖入 BIN: ${file.name}`);
+    }
+}
+
 // 打开对话框
 document.getElementById('compileBtn').addEventListener('click', () => {
     compileDialog.style.display = 'flex';
@@ -1560,8 +1657,8 @@ function renderDownloadLinks(binBuffer, esoBuffer, baseName, esoFileName) {
         addCompileLog('warn', 'JSZip 未加载，无法生成 ZIP 下载');
     }
 }
-// 编译当前关卡
-compileCurrentBtn.addEventListener('click', async () => {
+// 导入当前关卡
+importCurrentBtn.addEventListener('click', async () => {
     // 1. 获取当前关卡的 XML 字符串
     let xmlString;
     if (typeof window.getLevelXmlString === 'function') {
@@ -1674,6 +1771,14 @@ compileCurrentBtn.addEventListener('click', async () => {
         // 如果没有 PNG，清空
         setFiles(pngInput, []);
     }
+    // 自动填入文件名（与导出的 XML 文件名一致，方便在此基础上编辑）
+    const customNameInput = document.getElementById('compileCustomName');
+    if (customNameInput) {
+        customNameInput.value = baseName;
+        addCompileLog('info', `已自动填入文件名: ${baseName}`);
+    }
+
+
 
     // 5. 更新提示信息
     addCompileLog('info', `已导入当前关卡（${baseName}）的 XML 和 ${pngFiles.length} 个 PNG 层，主题已自动识别。`);
@@ -2017,7 +2122,7 @@ function addKeyEventsFromText(id, type) {
     }
 
     target.keyEvents.push(...parsed);
-    saveCache();
+    uniInterface();
     updatePanel();
     showToast(`成功导入 ${parsed.length} 个按键事件`);
 }
@@ -2077,7 +2182,7 @@ window.splitWaypoint = function(movingId, idx) {
     rebuildSpatialIndex();
     updatePanel();
     requestRender();
-    saveCache();
+    uniInterface();
     showToast(`路点已拆分为 ${n} 段`);
 };
 
@@ -2088,7 +2193,7 @@ window.moveCheckpoint = function(idx, delta) {
     [state.checkpoints[idx], state.checkpoints[newIdx]] = [state.checkpoints[newIdx], state.checkpoints[idx]];
     // 刷新列表和缓存
     updateElemList();
-    saveCache();
+    uniInterface();
 };
 
 function hasProjectData() {

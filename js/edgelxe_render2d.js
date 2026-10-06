@@ -184,6 +184,48 @@ function renderGrid() {
 	}
 	// 如果尺寸没变，只重绘内容，不重新设置 canvas 尺寸
 	
+    // ===== 拖拽中的选框 =====
+    if (typeof _selBox !== 'undefined' && _selBox) {
+        const x0 = Math.min(_selBox.x0, _selBox.x1);
+        const x1 = Math.max(_selBox.x0, _selBox.x1);
+        const y0 = Math.min(_selBox.y0, _selBox.y1);
+        const y1 = Math.max(_selBox.y0, _selBox.y1);
+        ctx.save();
+        ctx.strokeStyle = '#4fc3f7';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        const rx = padding + (x0 - minX) * pixelSize;
+        const ry = padding + (y0 - minY) * pixelSize;
+        const rw = (x1 - x0 + 1) * pixelSize;
+        const rh = (y1 - y0 + 1) * pixelSize;
+        ctx.fillStyle = 'rgba(79,195,247,0.15)';
+        ctx.fillRect(rx, ry, rw, rh);
+        ctx.strokeRect(rx, ry, rw, rh);
+        ctx.restore();
+    }
+
+    // ===== 多选高亮 =====
+    if (state.multiSelection && state.multiSelection.length) {
+        state.multiSelection.forEach(it => {
+            let sx, sy, sz;
+            if (it.type === 'static') {
+                sx = it.coord.x; sy = it.coord.y; sz = it.coord.z;
+            } else if (typeof getElementCoord === 'function') {
+                const p = getElementCoord(it.type, it.id);
+                if (!p) return;
+                sx = p.x; sy = p.y; sz = p.z;
+            } else return;
+            if (sz !== z) return;
+            const px = padding + (sx - minX) * pixelSize;
+            const py = padding + (sy - minY) * pixelSize;
+            ctx.save();
+            ctx.strokeStyle = '#ffd700';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(px + 1, py + 1, pixelSize - 2, pixelSize - 2);
+            ctx.restore();
+        });
+    }
+    
     updateStatus();
 }
 // 缓存 canvas 尺寸，避免重复设置
@@ -478,6 +520,10 @@ function renderWaypoints(m) {
 				<span class="wp-field-label">停留</span>
 				<input type="number" value="${wp.pauseTime||0}" min="0" onchange="updateWaypoint('${m.id}',${idx},'pauseTime',parseInt(this.value))" style="width:44px;">
 				${isFirst ? '' : `<button style="background:#1a4a7a;border:none;color:#fff;border-radius:3px;cursor:pointer;padding:0 8px;" onclick="splitWaypoint('${m.id}', ${idx})">拆分</button>`}
+                ${isFirst ? '' : `
+                    <button style="background:#1a4a7a;..." onclick="moveWaypoint('${m.id}',${idx},-1)">↑</button>
+                    <button style="background:#1a4a7a;..." onclick="moveWaypoint('${m.id}',${idx},1)">↓</button>
+                `}
 				${isFirst ? '' : `<button style="background:#a03030;border:none;color:#fff;border-radius:3px;cursor:pointer;padding:0 8px;" onclick="removeWaypoint('${m.id}',${idx})">✕</button>`}
 			</div>
 		`;
