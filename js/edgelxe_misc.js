@@ -1174,8 +1174,8 @@ function setInteractionMode(mode) {
     const btnMap = { preview: 'modePreview', select: 'modeSelect', edit: 'modeEdit' };
     document.getElementById(btnMap[mode]).classList.add('active');
     document.getElementById('modeHint').textContent = 
-        mode === 'preview' ? '鼠标拖拽旋转' :
-        mode === 'select' ? '左键选择元素' : '左键添加/右键删除';
+    mode === 'preview' ? '鼠标拖动旋转 | 滚轮缩放 | WASD移动 | 空格/Shift升降' :
+        mode === 'select' ? '鼠标拖动旋转 | 滚轮缩放 | WASD移动 | 空格/Shift升降 | 点击选择元素' : '鼠标拖动旋转 | 滚轮缩放 | WASD移动 | 空格/Shift升降 | 左右键添加/删除 | P键在镜头处放置';
     // 切换光标样式
     threeContainer.style.cursor = mode === 'preview' ? 'grab' : 'crosshair';
 }

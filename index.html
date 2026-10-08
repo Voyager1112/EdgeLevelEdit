@@ -135,13 +135,13 @@
 		<!-- 3D视图容器（并排） -->
 		<div class="view3d-container" id="view3dContainer">
 			<div class="three-controls" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; background:rgba(13,13,31,0.8); padding:4px 12px; border-radius:6px;">
-				<span style="color:#6a8aaa; font-size:11px;" id="3dViewMode">模式选择</span>
+				<span style="color:#6a8aaa; font-size:11px;" id="3dViewMode">模式</span>
 				<div style="display:flex; gap:2px;">
 					<button id="modePreview" class="mode-btn active" style="padding:2px 8px; font-size:11px;">预览</button>
 					<button id="modeSelect" class="mode-btn" style="padding:2px 8px; font-size:11px;">选择</button>
 					<button id="modeEdit" class="mode-btn" style="padding:2px 8px; font-size:11px;">编辑</button>
 				</div>
-				<span style="color:#6a8aaa; font-size:11px;" id="modeHint">鼠标拖拽</span>
+				<span style="color:#6a8aaa; font-size:11px;">视图</span>
 				<!-- 原有的视图按钮和缩放输入可保留，但为了整洁，将它们移到同一行 -->
 				<button class="view-btn" id="viewFrontBtn" style="padding:2px 8px; font-size:11px;">正</button>
 				<button class="view-btn" id="viewTopBtn" style="padding:2px 8px; font-size:11px;">俯</button>
@@ -154,8 +154,7 @@
 			<button class="close-3d" id="close3dBtn">✕ 关闭</button>
 			<button class="reset-camera-btn" id="resetCameraBtn">⟲ 重置视角</button>
 			<div id="threeContainer"></div>
-			<div class="three-info">鼠标拖动旋转 | 滚轮缩放</div>
-			
+			<div class="three-info" id="modeHint">鼠标拖动旋转 | 滚轮缩放</div>
 		</div>
 		
         <div class="panel" id="panel">
@@ -256,13 +255,13 @@
 			
 			<!-- XML 选择器（新增） -->
 			<div style="margin-bottom:12px;">
-				<label for="compileXmlInput">选择 XML / ZIP 文件：</label>
+				<label for="compileXmlInput">拖入/选择 XML / ZIP 文件：</label>
 				<button id="clearXmlBtn" class="cancel-btn" style="padding:2px 8px;">清除XML / ZIP</button>
 				<input type="file" id="compileXmlInput" accept=".xml,.zip" style="display:block; margin-top:4px; background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:4px; border-radius:4px; width:100%;">
 			</div>
 
 			<div style="margin-bottom:12px;">
-				<label for="compilePngInput">选择 PNG 层文件（可多选）：</label>
+				<label for="compilePngInput">拖入/选择 PNG 层文件（可多选）：</label>
 				<button id="clearPngBtn" class="cancel-btn" style="padding:2px 8px;">清除PNG</button>
 				<input type="file" id="compilePngInput" accept=".png" multiple style="display:block; margin-top:4px; background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:4px; border-radius:4px; width:100%;">
 			</div>
@@ -282,7 +281,7 @@
 					<input type="file" id="decompileBinInput" accept=".bin" style="display:none;">
 					<button id="decompileActionBtn" style="background:#2a5a7a; border:1px solid #4a8aba; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">⚙️ 反编译</button>
 					<button id="clearDecompileBtn" style="background:#a03030; border:1px solid #a03030; color:#fff; padding:4px 12px; border-radius:4px; cursor:pointer;">🗑️ 清除文件</button>
-					<span style="color:#6a8aaa; font-size:12px;">选择 .bin 文件，然后点击反编译</span>
+					<span style="color:#6a8aaa; font-size:12px;">选择 .bin 文件，然后点击反编译（或拖入 .bin 文件）</span>
                     <label  for="decompileStaticMovingToPng"style="font-size:12px;color:#aaa;margin-left:8px;">
                     <input type="checkbox" id="decompileStaticMovingToPng">
                     静止移动方块写入 PNG（不输出到 XML）
@@ -310,4 +309,4 @@
 	<script src="./js/edgelxe_elem.js"></script>
 	<script src="./js/edgelxe_misc.js"></script>
 	<script src="./js/edgelxe_init.js"></script>
-</html><!-- 15.5 -->
+</html><!-- 15.6b7 -->

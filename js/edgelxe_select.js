@@ -1,4 +1,4 @@
-// 全局变量
+// 全局变量..
 var _selBox = null;   // 拖拽中的选框 {x0,y0,x1,y1}
 // state.multiSelection 已在 edgelxe_elem.js 的 state 里定义
 
@@ -323,15 +323,42 @@ window.batchDeleteSelection = function () {
     if (!n) return;
     if (!confirm(`确定删除 ${n} 个元素？`)) return;
 
-    state.multiSelection.forEach(it => {
-        if (it.type === 'static') {
-            const c = it.coord;
-            const l = state.staticBlocks[c.z];
-            if (l && l[c.y]) l[c.y][c.x] = null;
-        } else {
-            deleteElement(it.type, it.id);
-        }
-    });
+    // ★ 关键：整个批量操作只记一次 undo
+    const beforeSnap = _serializeHistory();
+    const prevSuppressUI = state._suppressUI;
+    const prevSuppressUndo = state._suppressUndo;
+    state._suppressUI = true;
+    state._suppressUndo = true;
+
+    try {
+        const list = state.multiSelection.slice();
+        list.forEach(it => {
+            if (it.type === 'static') {
+                const c = it.coord;
+                const l = state.staticBlocks[c.z];
+                if (l && l[c.y]) l[c.y][c.x] = null;
+            } else if (it.type === 'empty') {
+                // 空坐标无需删除
+            } else {
+                deleteElement(it.type, it.id);   // 内部多次 saveCache/uniInterface，都被 suppress 拦下
+            }
+        });
+    } finally {
+        state._suppressUI = prevSuppressUI;
+        state._suppressUndo = prevSuppressUndo;
+    }
+
+    // 手动一次性 push undo
+    const afterSnap = _serializeHistory();
+    if (beforeSnap !== afterSnap) {
+        state._undoStack = state._undoStack || [];
+        state._redoStack = state._redoStack || [];
+        state._undoStack.push(beforeSnap);
+        while (state._undoStack.length > 50) state._undoStack.shift();
+        state._redoStack.length = 0;
+    }
+    state._lastSavedSnapshot = _serializeHistory();
+
     state.multiSelection = [];
     rebuildSpatialIndex();
     requestRender();
@@ -344,67 +371,88 @@ window.batchDeleteSelection = function () {
 
 window.batchShiftSelection = function (dx, dy, dz) {
     if (!state.multiSelection.length) return;
-    const { w, l, h } = state.level.size;
-    const newSel = [];
 
-    state.multiSelection.forEach(it => {
-        if (it.type === 'static') {
-            const c = it.coord;
-            const nz = c.z + dz, ny = c.y + dy, nx = c.x + dx;
-            if (nx < 0 || nx >= w || ny < 0 || ny >= l || nz < 0 || nz >= h) {
-                newSel.push(it);   // 越界保持原样
-                return;
-            }
-            const srcLayer = state.staticBlocks[c.z];
-            const block = srcLayer && srcLayer[c.y] && srcLayer[c.y][c.x];
-            if (!block) { newSel.push(it); return; }
-            srcLayer[c.y][c.x] = null;
-            const dstLayer = state.staticBlocks[nz];
-            if (dstLayer && dstLayer[ny]) dstLayer[ny][nx] = block;
-            newSel.push({ type: 'static', coord: { x: nx, y: ny, z: nz } });
-        } else {
-            // 各类元素的坐标平移
-            const p = getElementCoord(it.type, it.id);
-            if (!p) { newSel.push(it); return; }
-            const nx = p.x + dx, ny = p.y + dy, nz = p.z + dz;
-            switch (it.type) {
-                case 'moving': {
-                    const m = state.movingPlatforms.find(x => x.id === it.id);
-                    if (m && m.waypoints) {
-                        m.waypoints.forEach(wp => { wp.x += dx; wp.y += dy; wp.z += dz; });
+    const beforeSnap = _serializeHistory();
+    const prevSuppressUI = state._suppressUI;
+    const prevSuppressUndo = state._suppressUndo;
+    state._suppressUI = true;
+    state._suppressUndo = true;
+
+    const { w, l, h } = state.level.size;
+    let newSel = [];
+    try {
+        state.multiSelection.forEach(it => {
+            if (it.type === 'static') {
+                const c = it.coord;
+                const nz = c.z + dz, ny = c.y + dy, nx = c.x + dx;
+                if (nx < 0 || nx >= w || ny < 0 || ny >= l || nz < 0 || nz >= h) {
+                    newSel.push(it);   // 越界保持原样
+                    return;
+                }
+                const srcLayer = state.staticBlocks[c.z];
+                const block = srcLayer && srcLayer[c.y] && srcLayer[c.y][c.x];
+                if (!block) { newSel.push(it); return; }
+                srcLayer[c.y][c.x] = null;
+                const dstLayer = state.staticBlocks[nz];
+                if (dstLayer && dstLayer[ny]) dstLayer[ny][nx] = block;
+                newSel.push({ type: 'static', coord: { x: nx, y: ny, z: nz } });
+            } else {
+                // 各类元素的坐标平移
+                const p = getElementCoord(it.type, it.id);
+                if (!p) { newSel.push(it); return; }
+                const nx = p.x + dx, ny = p.y + dy, nz = p.z + dz;
+                switch (it.type) {
+                    case 'moving': {
+                        const m = state.movingPlatforms.find(x => x.id === it.id);
+                        if (m && m.waypoints) {
+                            m.waypoints.forEach(wp => { wp.x += dx; wp.y += dy; wp.z += dz; });
+                        }
+                        break;
                     }
-                    break;
+                    case 'falling': case 'prism': case 'bumper':
+                    case 'checkpoint': case 'cameratrigger': case 'button': {
+                        const arr = ({
+                            falling: state.fallingPlatforms, prism: state.prisms,
+                            bumper: state.bumpers, checkpoint: state.checkpoints,
+                            cameratrigger: state.cameraTriggers, button: state.buttons
+                        })[it.type];
+                        const el = arr && arr.find(x => x.id === it.id);
+                        if (el) { el.x = nx; el.y = ny; el.z = nz; }
+                        break;
+                    }
+                    case 'resizer': {
+                        const el = state.resizers.find(x => x.id === it.id);
+                        if (el) { el.x = nx; el.y = ny; el.z = nz; }
+                        break;
+                    }
+                    case 'othercube': {
+                        const el = state.otherCubes.find(x => x.id === it.id);
+                        if (el) { el.triggerX += dx; el.triggerY += dy; el.triggerZ += dz; }
+                        break;
+                    }
+                    case 'darkcube': {
+                        const el = state.darkCubes.find(x => x.id === it.id);
+                        if (el) { el.triggerX += dx; el.triggerY += dy; el.triggerZ += dz; }
+                        break;
+                    }
                 }
-                case 'falling': case 'prism': case 'bumper':
-                case 'checkpoint': case 'cameratrigger': case 'button': {
-                    const arr = ({
-                        falling: state.fallingPlatforms, prism: state.prisms,
-                        bumper: state.bumpers, checkpoint: state.checkpoints,
-                        cameratrigger: state.cameraTriggers, button: state.buttons
-                    })[it.type];
-                    const el = arr && arr.find(x => x.id === it.id);
-                    if (el) { el.x = nx; el.y = ny; el.z = nz; }
-                    break;
-                }
-                case 'resizer': {
-                    const el = state.resizers.find(x => x.id === it.id);
-                    if (el) { el.x = nx; el.y = ny; el.z = nz; }
-                    break;
-                }
-                case 'othercube': {
-                    const el = state.otherCubes.find(x => x.id === it.id);
-                    if (el) { el.triggerX += dx; el.triggerY += dy; el.triggerZ += dz; }
-                    break;
-                }
-                case 'darkcube': {
-                    const el = state.darkCubes.find(x => x.id === it.id);
-                    if (el) { el.triggerX += dx; el.triggerY += dy; el.triggerZ += dz; }
-                    break;
-                }
+                newSel.push(it);
             }
-            newSel.push(it);
-        }
-    });
+        });
+    } finally {
+        state._suppressUI = prevSuppressUI;
+        state._suppressUndo = prevSuppressUndo;
+    }
+
+    const afterSnap = _serializeHistory();
+    if (beforeSnap !== afterSnap) {
+        state._undoStack = state._undoStack || [];
+        state._redoStack = state._redoStack || [];
+        state._undoStack.push(beforeSnap);
+        while (state._undoStack.length > 50) state._undoStack.shift();
+        state._redoStack.length = 0;
+    }
+    state._lastSavedSnapshot = _serializeHistory();
 
     state.multiSelection = newSel;
     rebuildSpatialIndex();

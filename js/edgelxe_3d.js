@@ -8,6 +8,8 @@ let threeObjects = [];
 let raycaster = null;
 let pointer = null;
 
+const maxDistance = 500;
+
 function ensureRaycasterReady() {
     if (typeof THREE === 'undefined') return false;
     if (!raycaster) raycaster = new THREE.Raycaster();
@@ -54,7 +56,7 @@ function initThree() {
 	controls.autoRotate = false;
 	controls.target.set(0, 0.5, 0);
 	controls.minDistance = 0.1;
-	controls.maxDistance = 200;
+	controls.maxDistance = maxDistance;
 	controls.addEventListener('change', function() {
 		// 如果用户正在编辑输入框，不更新输入框的值，避免干扰输入
 		const input = document.getElementById('cameraDistInput');
@@ -156,7 +158,7 @@ function getCameraDirection() {
 // ---- 设置相机距离（保持方向不变） ----
 function setCameraDistance(dist, updateInput = true) {
 	if (!threeCamera || !threeControls) return;
-	dist = Math.max(0.1, Math.min(200, dist));
+	dist = Math.max(0.1, Math.min(maxDistance, dist));
 	const dir = getCameraDirection();
 	if (!dir) {
 		const { w, l, h } = state.level.size;
@@ -186,7 +188,7 @@ function setViewDirection(dirVec, label) {
 	const input = document.getElementById('cameraDistInput');
 	let dist = parseFloat(input ? input.value : 15);
 	if (isNaN(dist) || dist < 0.1) dist = 15;
-	dist = Math.max(0.1, Math.min(200, dist));
+	dist = Math.max(0.1, Math.min(maxDistance, dist));
 	const target = threeControls.target;
 	const dir = dirVec.clone().normalize();
 	threeCamera.position.copy(target).add(dir.multiplyScalar(dist));
