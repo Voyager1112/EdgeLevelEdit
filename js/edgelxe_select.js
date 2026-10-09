@@ -81,7 +81,7 @@ function applySelectionFromBox() {
     const seen = new Set();
     const layer = state.staticBlocks[z];
 
-    const includeEmpty = !!(document.getElementById('msIncludeEmpty')?.checked);
+    const includeEmpty = !!(state.settings && state.settings.msIncludeEmpty);
 
     for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) {
@@ -152,6 +152,13 @@ function showSelectionPanel() {
             <button class="add-btn" onclick="batchShiftSelection(0,0,1)">Z+1</button>
             <button class="add-btn" onclick="batchShiftSelection(0,0,-1)">Z-1</button>
         </div>
+        <div class="prop-row">
+            <label>原点（左上角）</label>
+            <input type="number" id="selOriginX" placeholder="X" style="width:50px;">
+            <input type="number" id="selOriginY" placeholder="Y" style="width:50px;">
+            <input type="number" id="selOriginZ" placeholder="Z" style="width:50px;">
+            <button class="add-btn" onclick="batchMoveSelectionOrigin()">移动</button>
+        </div>
     `;
 
     if (uniform === 'static') {
@@ -171,11 +178,25 @@ function showSelectionPanel() {
     }
 
     // ---- 复制粘贴（与 QuickFill 结合） ----
+    const clipInfo = (window.QuickFill && window.QuickFill.getClipboardInfo)
+        ? window.QuickFill.getClipboardInfo()
+        : null;
+    const clipText = clipInfo
+        ? `${clipInfo.blocks} 方块 + ${clipInfo.elements} 元素`
+        : '空';
+    const ow = (window.QuickFill && window.QuickFill.getOverwrite)
+        ? window.QuickFill.getOverwrite()
+        : false;
+
     html += `
         <div class="sub-elem-section">
             <div class="sub-title">复制 / 粘贴</div>
             <div class="prop-row">
                 <button class="add-btn" onclick="batchCopyToClipboard()">📄 复制选区</button>
+            </div>
+            <div class="prop-row">
+                <button class="add-btn" onclick="batchSetPasteTargetFromSelection()"
+                        title="把选区左上角作为粘贴落点">🎯 用选区左上角作目标</button>
             </div>
             <div class="prop-row">
                 <label>粘贴到</label>
@@ -184,7 +205,13 @@ function showSelectionPanel() {
                 <input type="number" id="batchPasteZ" placeholder="Z" style="width:50px;">
                 <button class="add-btn" onclick="batchPasteAtInput()">📥 粘贴</button>
             </div>
-            <div style="font-size:11px;color:#8aaccc;" id="batchClipInfo">剪贴板：空</div>
+            <label style="display:block;margin:4px 0;color:#8ab4f8;">
+                <input type="checkbox" id="batchPasteOverwrite"
+                    onchange="window.QuickFill && window.QuickFill.setOverwrite && window.QuickFill.setOverwrite(this.checked)"
+                    ${ow ? 'checked' : ''}>
+                覆盖目标位置原有元素（勾选=替换，不勾=直接添加）
+            </label>
+            <div style="font-size:11px;color:#8aaccc;" id="batchClipInfo">剪贴板：${clipText}</div>
         </div>
     `;
 
@@ -194,6 +221,21 @@ function showSelectionPanel() {
             <button class="add-btn" onclick="clearMultiSelection()">取消选择</button>
         </div>
     `;
+    
+    // 初始化"原点"输入框为当前选区左上角
+    (function initOriginInputs(html) {
+        // 这里用 setTimeout 是因为要等 pc.innerHTML 生效后才能 getElementById
+        setTimeout(() => {
+            const b = getSelectionBounds();
+            if (!b) return;
+            const ix = document.getElementById('selOriginX');
+            const iy = document.getElementById('selOriginY');
+            const iz = document.getElementById('selOriginZ');
+            if (ix) ix.value = b.minX;
+            if (iy) iy.value = b.minY;
+            if (iz) iz.value = b.minZ;
+        }, 0);
+    })();
 
     pc.innerHTML = html;
     // 更新剪贴板状态
@@ -365,7 +407,7 @@ window.batchDeleteSelection = function () {
     updatePanel();
     updateElemList();
     updateStatus();
-    saveCache();
+    uniInterface();
     showToast(`已删除 ${n} 个元素`);
 };
 
@@ -458,9 +500,38 @@ window.batchShiftSelection = function (dx, dy, dz) {
     rebuildSpatialIndex();
     updateCanvasRangeFromSize();
     requestRender();
-    updatePanel();
+    showSelectionPanel();
     updateElemList();
-    saveCache();
+    uniInterface();
+};
+
+window.batchMoveSelectionOrigin = function () {
+    const b = getSelectionBounds();
+    if (!b) { showToast('请先选中至少一个元素'); return; }
+
+    const ix = document.getElementById('selOriginX');
+    const iy = document.getElementById('selOriginY');
+    const iz = document.getElementById('selOriginZ');
+    const tx = parseInt(ix.value);
+    const ty = parseInt(iy.value);
+    const tz = parseInt(iz.value);
+    if (isNaN(tx) || isNaN(ty) || isNaN(tz)) {
+        showToast('请填写完整的 X/Y/Z');
+        return;
+    }
+
+    const dx = tx - b.minX;
+    const dy = ty - b.minY;
+    const dz = tz - b.minZ;
+    if (dx === 0 && dy === 0 && dz === 0) {
+        showToast('原点已在目标位置');
+        return;
+    }
+
+    // 走一次 batchShiftSelection，它会重算 newSel 并刷新 showSelectionPanel
+    // 但问题是：多选面板会被 showSelectionPanel 重建，输入框会重设为新的左上角。
+    // 所以这里偏移后，输入框自动变成目标值，用户可继续操作。
+    window.batchShiftSelection(dx, dy, dz);
 };
 
 window.batchSetStaticRGB = function (r, g, b) {
@@ -476,7 +547,7 @@ window.batchSetStaticRGB = function (r, g, b) {
     });
     requestRender();
     updateStatus();
-    saveCache();
+    uniInterface();
     showToast(`已修改 ${n} 个静态方块颜色`);
 };
 
@@ -484,4 +555,76 @@ window.clearMultiSelection = function () {
     state.multiSelection = [];
     requestRender();
     updatePanel();
+};
+
+// ---------- 复制 / 粘贴入口 ----------
+
+// 计算多选选区的边界
+function getSelectionBounds() {
+    if (!state.multiSelection.length) return null;
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    state.multiSelection.forEach(it => {
+        let p = null;
+        if (it.coord) p = it.coord;                          // static / empty
+        else if (typeof getElementCoord === 'function') p = getElementCoord(it.type, it.id);
+        if (!p) return;
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+        if (p.z < minZ) minZ = p.z;
+        if (p.z > maxZ) maxZ = p.z;
+    });
+    if (!isFinite(minX)) return null;
+    return { minX, minY, minZ, maxX, maxY, maxZ };
+}
+
+// ★ 用选区左上角作为粘贴目标
+window.batchSetPasteTargetFromSelection = function () {
+    const b = getSelectionBounds();
+    if (!b) { showToast('请先选中至少一个元素'); return; }
+    if (!window.QuickFill || !window.QuickFill.setPasteCoord) {
+        showToast('QuickFill 未加载'); return;
+    }
+    window.QuickFill.setPasteCoord(b.minX, b.minY, b.minZ);
+    // 顺便把坐标回填到面板输入框，便于用户微调
+    const ix = document.getElementById('batchPasteX');
+    const iy = document.getElementById('batchPasteY');
+    const iz = document.getElementById('batchPasteZ');
+    if (ix) ix.value = b.minX;
+    if (iy) iy.value = b.minY;
+    if (iz) iz.value = b.minZ;
+    showToast(`粘贴目标已设为 (${b.minX},${b.minY},${b.minZ})`);
+};
+
+// 复制选区到剪贴板
+window.batchCopyToClipboard = function () {
+    if (!state.multiSelection.length) { showToast('未选中任何元素'); return; }
+    if (!window.QuickFill || !window.QuickFill.setCopyBox || !window.QuickFill.doCopy) {
+        showToast('QuickFill 未加载'); return;
+    }
+    const b = getSelectionBounds();
+    if (!b) { showToast('无法计算包围盒'); return; }
+
+    window.QuickFill.setCopyBox(b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ);
+    window.QuickFill.doCopy();
+    showSelectionPanel();   // 刷新剪贴板信息
+};
+
+// 从输入框读目标坐标并粘贴
+window.batchPasteAtInput = function () {
+    if (!window.QuickFill || !window.QuickFill.setPasteCoord || !window.QuickFill.doPaste) {
+        showToast('QuickFill 未加载'); return;
+    }
+    const x = parseInt(document.getElementById('batchPasteX')?.value);
+    const y = parseInt(document.getElementById('batchPasteY')?.value);
+    const z = parseInt(document.getElementById('batchPasteZ')?.value);
+    if (isNaN(x) || isNaN(y) || isNaN(z)) {
+        showToast('请填写完整的 X/Y/Z');
+        return;
+    }
+    window.QuickFill.setPasteCoord(x, y, z);
+    window.QuickFill.doPaste();
+    showSelectionPanel();
 };

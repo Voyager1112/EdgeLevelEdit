@@ -696,8 +696,6 @@ B 通道（模型高度）
 	
 	document.getElementById('exportZipBtn').addEventListener('click', exportZip);
 	
-	document.getElementById('newProjectBtn').addEventListener('click', newProject);
-	
 	// 恢复绘制模式高亮
 	const singleBtn = document.getElementById('toolSingle');
 	const brushBtn = document.getElementById('toolBrush');
@@ -1207,6 +1205,55 @@ B 通道（模型高度）
             el.addEventListener(isSize ? 'change' : 'input', applyLive);
         });
     })();
+    
+    // ===== 设置面板 =====
+    (function initSettingsPanel() {
+        const dlg = document.getElementById('settingsDialog');
+        const btn = document.getElementById('settingsBtn');
+        if (!dlg || !btn) return;
+
+        function syncFromState() {
+            document.getElementById('settingUseShareDownload').checked =
+                !!state.settings.useShareDownload;
+            document.getElementById('settingMsIncludeEmpty').checked =
+                !!state.settings.msIncludeEmpty;
+            document.getElementById('settingPasteOverwrite').checked =
+                !!state.settings.pasteOverwrite;
+            document.getElementById('settingImportNewProject').checked =
+                !!state.settings.importNewProject;
+        }
+
+        btn.addEventListener('click', () => {
+            syncFromState();
+            dlg.style.display = 'flex';
+        });
+        window.closeSettingsDialog = () => { dlg.style.display = 'none'; };
+        dlg.addEventListener('click', e => { if (e.target === dlg) dlg.style.display = 'none'; });
+
+        document.getElementById('settingUseShareDownload').addEventListener('change', function () {
+            state.settings.useShareDownload = this.checked;
+            saveCache();
+        });
+
+        document.getElementById('settingMsIncludeEmpty').addEventListener('change', function () {
+            state.settings.msIncludeEmpty = this.checked;
+            saveCache();
+        });
+
+        document.getElementById('settingPasteOverwrite').addEventListener('change', function () {
+            state.settings.pasteOverwrite = this.checked;
+            // 同步给 QuickFill（它内部有一份 cb.overwrite）
+            if (window.QuickFill && window.QuickFill.setOverwrite) {
+                window.QuickFill.setOverwrite(this.checked);
+            }
+            saveCache();
+        });
+
+        document.getElementById('settingImportNewProject').addEventListener('change', function () {
+            state.settings.importNewProject = this.checked;
+            saveCache();
+        });
+    })();
 
 	state._lastSavedSnapshot = _serializeHistory();
     state._undoStack = [];
@@ -1253,6 +1300,11 @@ B 通道（模型高度）
         document.getElementById('msEmptyLabel').hidden = false;
         requestRender();
     });
+    
+    // 把 state 中的设置同步到各子系统
+    if (window.QuickFill && window.QuickFill.setOverwrite) {
+        window.QuickFill.setOverwrite(!!state.settings.pasteOverwrite);
+    }
 
 	fixFormFieldAssociations(document);
 	setInteractionMode('preview');

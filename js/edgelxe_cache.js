@@ -24,7 +24,8 @@ function saveCache() {
 			visibility: state.visibility,
 			_idCounters: state._idCounters,
 			levelUseAngle: state.levelUseAngle,
-			autoName: state.autoName
+			autoName: state.autoName,
+            settings: state.settings,
         };
         const str = JSON.stringify(data);
         localStorage.setItem(CACHE_KEY, str);
@@ -68,6 +69,11 @@ function loadCache() {
 		const data = JSON.parse(raw);
 		Object.assign(state, data);
 		// 如果缺少新字段，设置默认值
+        if (!state.settings) state.settings = {};
+        if (state.settings.useShareDownload === undefined) state.settings.useShareDownload = false;
+        if (state.settings.msIncludeEmpty === undefined) state.settings.msIncludeEmpty = false;
+        if (state.settings.pasteOverwrite === undefined) state.settings.pasteOverwrite = false;
+        if (state.settings.importNewProject === undefined) state.settings.importNewProject = false;
 		if (data.levelUseAngle !== undefined) {
 			state.levelUseAngle = data.levelUseAngle;
 		}

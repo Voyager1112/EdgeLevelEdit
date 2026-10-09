@@ -238,26 +238,6 @@ function newProject() {
 				  state.darkCubes.length > 0;
 	}
 
-	if (hasData) {
-		const wantNew = confirm(
-			'确定新建项目吗？ \n\n' +
-			'点击【确定】→ 确认新建\n' +
-			'点击【取消】→ 不新建'
-		);
-		if (wantNew) {
-			const confirmNew = confirm(
-				'是否保存当前项目？\n\n' +
-				'点击【确定】→ 保存并导出为zip\n' +
-				'点击【取消】→ 丢弃当前所有数据'
-			);
-			if (confirmNew) {
-				exportZip(); // 导出并继续新建
-			}
-		} else {
-			return; 
-		}
-	}
-
 	// 重置所有数据
 	const { w, l, h } = state.level.size;
 	// 重置静态块（全空）
@@ -1999,6 +1979,42 @@ function showDecompileButtons(result, baseName) {
             });
         }).catch(err => safeLog('err', '生成 ZIP 失败: ' + err.message));
     };
+    // 4. 直接导入到编辑器
+    const btnImport = document.createElement('button');
+    btnImport.textContent = '📥 导入到编辑器';
+    btnImport.className = 'download-link';
+    btnImport.style.cssText = 'display:inline-block; padding:6px 14px; background:#2a5a7a; border:1px solid #4fc3f7; border-radius:6px; color:#4fc3f7; text-decoration:none; font-weight:600; cursor:pointer; margin-right:8px;';
+    btnImport.onclick = async function () {
+        if (!confirm('导入会覆盖当前编辑器内容（可撤销）。继续？')) return;
+
+        try {
+            const xmlFile = new File([result.xml], `${baseName}.xml`, { type: 'text/xml' });
+
+            // 把 ImageData 转成 PNG File
+            const pngFiles = [];
+            for (const z of Object.keys(result.pngs)) {
+                const imageData = result.pngs[z];
+                const canvas = document.createElement('canvas');
+                canvas.width = imageData.width;
+                canvas.height = imageData.height;
+                const ctx = canvas.getContext('2d');
+                ctx.putImageData(imageData, 0, 0);
+                const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+                pngFiles.push(new File([blob], `${baseName}.${z}.png`, { type: 'image/png' }));
+            }
+
+            // 复用现有导入路径（自动触发一次 undo）
+            loadXMLAndPNG([xmlFile, ...pngFiles]);
+
+            // 关闭编译对话框，避免遮挡编辑器
+            const dlg = document.getElementById('compileDialog');
+            if (dlg) dlg.style.display = 'none';
+            safeLog('ok', `已导入 ${baseName} 到编辑器`);
+        } catch (err) {
+            safeLog('err', `导入失败: ${err.message}`);
+        }
+    };
+    area.appendChild(btnImport);
     area.appendChild(btnZip);
 }
 

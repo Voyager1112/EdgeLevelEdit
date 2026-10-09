@@ -7,7 +7,7 @@
 	<script src="./js/online/OrbitControls.js"></script>
 	<script src="./js/online/jszip.min.js"></script>
     <meta charset="UTF-8">
-    <title>Edge 关卡xml编辑器3D 1.6.7</title>
+    <title>Edge 关卡xml编辑器3D 1.6.8</title>
     <link rel="icon" type="image/png" sizes="32x32" href="./misc/favicon.png">
     <link rel="apple-touch-icon" href="./misc/favicon.png">
     <link rel="alt-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='10 0 100 90'%3E%3Ctext y='.9em' font-size='90'%3E🧊%3C/text%3E%3C/svg%3E">
@@ -32,11 +32,7 @@
             <label>FOV <input type="number" id="levelFov" value="22" min="0" max="184" style="width:40px;"></label>
             <label>ModelTheme <input type="number" id="modelTheme" value="0" min="0" style="width:40px;"></label>
             <button id="projectManagerBtn">📁 项目</button>
-			<button id="newProjectBtn">新建项目</button>
 			<div class="sep"></div>
-			<label style="font-size:12px;color:#6a8aaa;">
-				<input type="checkbox" id="useShareDownload"> 手机下载
-			</label>
 			<button id="loadXmlBtn">加载XML+PNG</button>
 			<input type="file" id="fileXmlInput" accept=".xml,.png,.zip" multiple style="display:none;">
 			<button id="exportPngBtn">导出PNG</button>
@@ -44,11 +40,9 @@
 			<button id="exportZipBtn">导出ZIP</button>
 			<button id="compileBtn">📦 编译</button>
 			<div class="sep"></div>
+            <button id="settingsBtn">⚙ 设置</button>
 			<button id="helpBtn">帮助</button>
             <div class="sep"></div>
-            <label style="font-size:12px;color:#6a8aaa;" id="msEmptyLabel" hidden>
-                <input type="checkbox" id="msIncludeEmpty"> 选择模式包含空格
-            </label>
 			<a href="./misc/levelgen.html">关卡生成器</a>
 			<a href="./misc/profedit.html" type="text/html">移动版存档编辑器</a>
         </div>
@@ -294,6 +288,32 @@
 			<div id="compileDownloadArea" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
 		</div>
 	</div>
+    <!-- 设置面板 -->
+    <div id="settingsDialog" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:3200; justify-content:center; align-items:center;">
+        <div style="background:#16213e; border:2px solid #4fc3f7; border-radius:8px; padding:20px; min-width:320px; color:#eee;">
+            <h3 style="color:#8ab4f8; margin:0 0 12px 0;">⚙ 设置</h3>
+
+            <label style="display:block; margin:8px 0; font-size:13px;">
+                <input type="checkbox" id="settingUseShareDownload"> 手机下载（用 Web Share API）
+            </label>
+
+            <label style="display:block; margin:8px 0; font-size:13px;">
+                <input type="checkbox" id="settingMsIncludeEmpty"> 多选框选时可选中空格子
+            </label>
+
+            <label style="display:block; margin:8px 0; font-size:13px;">
+                <input type="checkbox" id="settingPasteOverwrite"> 粘贴时覆盖目标位置原有元素（不勾=直接添加）
+            </label>
+
+            <label style="display:block; margin:8px 0; font-size:13px;">
+                <input type="checkbox" id="settingImportNewProject"> 导入 XML / PNG / ZIP 时新建项目（不勾=覆盖当前项目）
+            </label>
+
+            <div style="text-align:right; margin-top:16px;">
+                <button class="cancel-btn" onclick="closeSettingsDialog()">关闭</button>
+            </div>
+        </div>
+    </div>
 </body>
 	<!-- 顺序不能随便改 -->
 	<script src="./js/edgelxe_utils.js"></script>

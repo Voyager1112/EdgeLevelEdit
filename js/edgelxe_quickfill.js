@@ -35,6 +35,7 @@ const cb = {
     normal: 'y+',
     clipboard: null,
     keepCoordsAfter: false,
+    overwrite: false,   // ★ 粘贴时是否覆盖目标位置原有元素
 };
 
 // ==================== 通用工具 ====================
@@ -886,7 +887,12 @@ function doCopy() {
         elements.push({ kind: 'buttonsequence', type: 'buttonsequence', clone, childRels });
     });
 
-    cb.clipboard = { min, blocks, elements };
+    cb.clipboard = {
+        min,
+        max: { x: b.maxX, y: b.maxY, z: b.maxZ },   // ★ 记下 bbox 上限
+        blocks,
+        elements
+    };
     if (!cb.keepCoordsAfter) {
         cb.copyCoords.length = 0;
         refreshCbCopyList();
@@ -1006,6 +1012,31 @@ function doPaste() {
     })[t];
 
     try {
+        // ★ 覆盖模式：先清空目标区域
+        if (cb.overwrite && clip.max) {
+            const bW = clip.max.x - clip.min.x;
+            const bL = clip.max.y - clip.min.y;
+            const bH = clip.max.z - clip.min.z;
+            for (let dz = 0; dz <= bH; dz++) {
+                for (let dy = 0; dy <= bL; dy++) {
+                    for (let dx = 0; dx <= bW; dx++) {
+                        const dst = mapOffset(dx, dy, dz);
+                        if (dst.x < 0 || dst.x >= state.level.size.w) continue;
+                        if (dst.y < 0 || dst.y >= state.level.size.l) continue;
+                        if (dst.z < 0 || dst.z >= state.level.size.h) continue;
+                        // 清空静态方块
+                        const layer = state.staticBlocks[dst.z];
+                        if (layer && layer[dst.y]) layer[dst.y][dst.x] = null;
+                        // 清空非静态元素
+                        const entries = getEntriesAt(dst.x, dst.y, dst.z);
+                        entries.forEach(e => {
+                            if (e.type === 'waypoint') return;
+                            deleteElementSilent(e.type, e.id);
+                        });
+                    }
+                }
+            }
+        }
         clip.blocks.forEach(b => {
             const dst = mapOffset(b.x - clip.min.x, b.y - clip.min.y, b.z - clip.min.z);
             if (dst.x < 0 || dst.x >= state.level.size.w ||
@@ -1228,6 +1259,10 @@ function createPanel() {
             <label style="display:block;margin:2px 0;"><input type="radio" name="cbNormal" value="x+"> X+</label>
             <label style="display:block;margin:2px 0;"><input type="radio" name="cbNormal" value="x-"> X-</label>
 
+            
+            <label style="display:block;margin:8px 0 4px;color:#8ab4f8;">
+                <input type="checkbox" id="cbOverwrite"> 覆盖目标位置原有元素
+            </label>
             <button id="cbPasteBtn" style="width:100%;padding:8px;margin-top:10px;background:#14532d;border:1px solid #22c55e;color:#86efac;border-radius:4px;cursor:pointer;font-weight:bold;">
                 📥 粘贴
             </button>
@@ -1411,6 +1446,12 @@ function bindEvents() {
         el.addEventListener('change', () => { cb.normal = el.value; });
     });
     document.getElementById('cbPasteBtn').addEventListener('click', doPaste);
+    const owEl = document.getElementById('cbOverwrite');
+    if (owEl) {
+        owEl.addEventListener('change', function () {
+            cb.overwrite = this.checked;
+        });
+    }
     
     // 保留坐标复选框
     document.getElementById('qfKeepCoords').addEventListener('change', function() {
@@ -1633,6 +1674,16 @@ window.QuickFill = {
     },
     doCopy,
     doPaste,
+    
+    setOverwrite(v) {
+        cb.overwrite = !!v;
+        if (state.settings) state.settings.pasteOverwrite = cb.overwrite;
+        const el = document.getElementById('cbOverwrite');
+        if (el) el.checked = cb.overwrite;
+    },
+    getOverwrite() {
+        return cb.overwrite;
+    },
     getClipboardInfo() {
         if (!cb.clipboard) return null;
         return {
@@ -1646,52 +1697,6 @@ window.QuickFill = {
 window.Clipboard = {
     toggle() { window.QuickFill.toggle(); switchTab('clip'); },
     open()   { window.QuickFill.open(); switchTab('clip'); }
-};
-
-// 多选复制：计算包围盒 → 喂给 QuickFill → doCopy
-window.batchCopyToClipboard = function () {
-    if (!state.multiSelection.length) { showToast('未选中任何元素'); return; }
-    if (!window.QuickFill || !window.QuickFill.setCopyBox || !window.QuickFill.doCopy) {
-        showToast('QuickFill 未加载'); return;
-    }
-
-    // 计算包围盒（空格子也计入）
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    state.multiSelection.forEach(it => {
-        let p = null;
-        if (it.coord) p = it.coord;                            // static / empty
-        else if (typeof getElementCoord === 'function') p = getElementCoord(it.type, it.id);
-        if (!p) return;
-        if (p.x < minX) minX = p.x;
-        if (p.x > maxX) maxX = p.x;
-        if (p.y < minY) minY = p.y;
-        if (p.y > maxY) maxY = p.y;
-        if (p.z < minZ) minZ = p.z;
-        if (p.z > maxZ) maxZ = p.z;
-    });
-    if (!isFinite(minX)) { showToast('无法计算包围盒'); return; }
-
-    window.QuickFill.setCopyBox(minX, minY, minZ, maxX, maxY, maxZ);
-    window.QuickFill.doCopy();
-    showSelectionPanel();   // 刷新剪贴板信息
-};
-
-// 多选粘贴：从输入框读 X/Y/Z → 喂给 QuickFill → doPaste
-window.batchPasteAtInput = function () {
-    if (!window.QuickFill || !window.QuickFill.setPasteCoord || !window.QuickFill.doPaste) {
-        showToast('QuickFill 未加载'); return;
-    }
-    const x = parseInt(document.getElementById('batchPasteX')?.value);
-    const y = parseInt(document.getElementById('batchPasteY')?.value);
-    const z = parseInt(document.getElementById('batchPasteZ')?.value);
-    if (isNaN(x) || isNaN(y) || isNaN(z)) {
-        showToast('请填写完整的 X/Y/Z');
-        return;
-    }
-    window.QuickFill.setPasteCoord(x, y, z);
-    window.QuickFill.doPaste();
-    showSelectionPanel();
 };
 
 if (document.readyState === 'loading') {

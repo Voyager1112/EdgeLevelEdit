@@ -132,6 +132,12 @@ const state = {
     canvasEditMode: 'select',   // 'select' | 'add'
     selectedWaypoint: null,  // { movingId, idx }
     multiSelection: [],   // ← 新增
+    settings: {
+        importNewProject: false,   // true=导入到新项目，false=导入到当前项目
+        useShareDownload: false,   // ★ 手机下载（Web Share API）
+        msIncludeEmpty: false,     // ★ 多选时是否包含空格子
+        pasteOverwrite: false,     // ★ 粘贴时是否覆盖目标位置原有元素
+    },
 };
 
 // 渲染节流
@@ -1105,6 +1111,8 @@ function placeMoving(x, y, z) {
     }
 
     state.movingPlatforms.push(newM);
+    // ★ 遍历所有路点扩展画布范围
+    //newM.waypoints.forEach(wp => expandCanvasRangeForPoint(wp.x, wp.y, wp.z));
     selectElement('moving', internalId);
     requestRender();
     updateElemList();

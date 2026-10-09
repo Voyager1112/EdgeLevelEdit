@@ -332,6 +332,24 @@ function loadXMLAndPNG(files) {
     // 兼容 FileList / 数组，快照为真数组，避免后续被清空
     files = Array.from(files);
 
+    // ★ 导入全过程只记一次 undo
+    const importBeforeSnap = _serializeHistory();
+    const importPrevSuppressUndo = state._suppressUndo;
+    state._suppressUndo = true;
+    // 结束导入并记一次 undo 的辅助函数
+    function _finishImport() {
+        state._suppressUndo = importPrevSuppressUndo;
+        const afterSnap = _serializeHistory();
+        if (importBeforeSnap !== afterSnap) {
+            state._undoStack = state._undoStack || [];
+            state._redoStack = state._redoStack || [];
+            state._undoStack.push(importBeforeSnap);
+            while (state._undoStack.length > 50) state._undoStack.shift();
+            state._redoStack.length = 0;
+        }
+        state._lastSavedSnapshot = afterSnap;
+    }
+
     if (!state._idCounters) state._idCounters = {};
     state.nextIdCounter = 1;
     state._idCounters = {};
@@ -349,6 +367,26 @@ function loadXMLAndPNG(files) {
     if (!xmlFile) {
         showToast('未找到XML文件');
         return;
+    }
+    
+    // ★ 导入模式处理
+    if (state.settings && state.settings.importNewProject) {
+        if (window.PM && window.PM.sync) window.PM.sync();
+        if (typeof createProject === 'function' && typeof setCurrentProjectId === 'function') {
+            const baseName = xmlFile.name.replace(/\.xml$/i, '');
+            const projName = prompt('新项目名：', baseName) || baseName;
+            const pid = createProject(projName);
+            setCurrentProjectId(pid);
+            // 清空当前编辑状态，避免旧元素混入
+            if (typeof newProject === 'function') {
+                // 临时关掉保存，防止 newProject 里触发 saveCache 又把数据写回
+                const prev = state._suppressUI;
+                state._suppressUI = true;
+                newProject();
+                state._suppressUI = prev;
+            }
+            showToast(`已创建项目：${projName}`);
+        }
     }
 
 	const xmlBaseName = xmlFile.name.replace(/\.xml$/i, '');
@@ -932,6 +970,7 @@ function loadXMLAndPNG(files) {
 
 			// PNG 加载逻辑（同之前）
 			if (pngFiles.length === 0) {
+                _finishImport();
 				showToast('未找到PNG文件，可手动导入');
 				return;
 			}
@@ -959,6 +998,7 @@ function loadXMLAndPNG(files) {
 			let loadedCount = 0;
 			const totalLayers = Object.keys(pngMap).length;
 			if (totalLayers === 0) {
+                _finishImport();
 				showToast('没有可导入的PNG');
 				return;
 			}
@@ -996,6 +1036,7 @@ function loadXMLAndPNG(files) {
 							requestRender();
 							updateStatus();
 							uniInterface();
+                            _finishImport();
 							showToast(`已导入 ${totalLayers} 层PNG (匹配基准: ${xmlBaseName})`);
 						}
 					};
@@ -1005,6 +1046,7 @@ function loadXMLAndPNG(files) {
 			}
 
 		} catch (err) {
+            _finishImport();
 			showToast('加载失败: ' + err.message);
 		}
 		updateLayerMax();
@@ -1013,7 +1055,7 @@ function loadXMLAndPNG(files) {
 }
 
 function downloadFile(blob, filename) {
-	const useShare = document.getElementById('useShareDownload').checked;
+	const useShare = !!(state.settings && state.settings.useShareDownload);
 	if (useShare && navigator.share && navigator.canShare) {
 		try {
 			const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });

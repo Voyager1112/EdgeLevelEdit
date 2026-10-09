@@ -96,19 +96,37 @@ function createProject(name, data) {
 function switchProject(id) {
     if (!id) return;
     if (id === getCurrentProjectId()) return;
-    // 先把当前编辑状态存到原项目
+
+    // 1. 保存当前项目数据到存储
     saveCurrentToProject();
+
+    // 2. 加载目标项目
     const store = loadProjectStore();
     const proj = store.projects.find(p => p.id === id);
     if (!proj) return;
+
+    // 3. 恢复编辑状态（restoreData 内部会走 _restoreHistory，
+    //    它会 syncLevelUI + requestRender + updatePanel + updateElemList + updateStatus）
     if (proj.data) {
         restoreData(proj.data);
     } else {
         if (typeof newProject === 'function') newProject();
     }
+
+    // 4. 切换当前项目 ID
     setCurrentProjectId(id);
+
+    // 5. ★ 关键：重置撤销/重做历史
+    //    跨项目的撤销没有意义，切换后清空即可
+    state._undoStack = [];
+    state._redoStack = [];
+    state._lastSavedSnapshot = _serializeHistory();
+
+    // 6. 只存盘，不要走 uniInterface（避免误 push undo）
+    saveCache();
+
+    // 7. UI 提示
     showToast(`已切换到项目：${proj.name || '(未命名)'}`);
-    if (typeof saveCache === 'function') saveCache();
 }
 
 async function exportProjectZip(id) {
@@ -228,11 +246,17 @@ function renderProjectList() {
                 </div>
                 <div style="display:flex; gap:6px;" onclick="event.stopPropagation();">
                     <button onclick="PM.duplicate('${p.id}')" title="创建副本"
-                        style="background:#1a4a7a;border:1px solid #2a5a8a;color:#eee;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">📋 副本</button>
+                        style="background:#1a4a7a;border:1px solid #2a5a8a;color:#eee;
+                               padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;
+                               width:auto; display:inline-block; margin:0; flex-shrink:0;">📋 副本</button>
                     <button onclick="PM.exportZip('${p.id}')" title="导出 ZIP"
-                        style="background:#1a4a7a;border:1px solid #2a5a8a;color:#eee;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">⬇ ZIP</button>
+                        style="background:#1a4a7a;border:1px solid #2a5a8a;color:#eee;
+                               padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;
+                               width:auto; display:inline-block; margin:0; flex-shrink:0;">⬇ ZIP</button>
                     <button onclick="PM.remove('${p.id}')" title="删除"
-                        style="background:#a03030;border:1px solid #c04040;color:#fff;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">🗑 删除</button>
+                        style="background:#a03030;border:1px solid #c04040;color:#fff;
+                               padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;
+                               width:auto; display:inline-block; margin:0; flex-shrink:0;">🗑 删除</button>
                 </div>
             </div>
         `;
@@ -249,16 +273,22 @@ function openProjectManager() {
         dlg.style.display = 'none';
         dlg.innerHTML = `
             <div class="dialog-box" style="min-width:560px; max-width:92vw;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <h4 style="margin:0;">📁 项目管理</h4>
+                <div style="display:flex; justify-content:space-between; align-items:center;
+                            margin-bottom:12px; gap:8px;">
+                    <h4 style="margin:0; white-space:nowrap; flex-shrink:0;">📁 项目管理</h4>
                     <button id="pmCreateBtn"
-                        style="background:#14532d;border:1px solid #22c55e;color:#86efac;padding:4px 14px;border-radius:4px;cursor:pointer;">
+                        style="background:#14532d;border:1px solid #22c55e;color:#86efac;
+                               padding:4px 14px;border-radius:4px;cursor:pointer;
+                               width:auto; display:inline-block; margin:0; flex-shrink:0;">
                         + 新建项目
                     </button>
                 </div>
                 <div id="pmList" style="max-height:60vh; overflow-y:auto;"></div>
                 <div style="text-align:right; margin-top:12px;">
-                    <button class="cancel-btn" onclick="PM.close()">关闭</button>
+                    <button class="cancel-btn" onclick="PM.close()"
+                        style="width:auto; display:inline-block; margin:0;">
+                        关闭
+                    </button>
                 </div>
             </div>
         `;
