@@ -1043,6 +1043,8 @@ class EdgeCompiler {
         const origId = this.getAttrIgnoreCase(mp.el, 'ID') || 'M';
         const fullBlock = this.getAttrIgnoreCase(mp.el, 'FullBlock', 'True');
         const parentAutoStart = this.getAttrIgnoreCase(mp.el, 'AutoStart', 'True');
+
+        // ✅ LoopStartIndex="0" 不能被 || 1 覆盖
         const lsiAttr = this.getAttrIgnoreCase(mp.el, 'LoopStartIndex', '1');
         let parentLsi = parseInt(lsiAttr, 10);
         if (isNaN(parentLsi)) parentLsi = 1;
@@ -1050,7 +1052,7 @@ class EdgeCompiler {
         const { path, times, wpIndices } = this.buildFullPath(wps);
         const symmetric = this.isSymmetric(wps, parentLsi);
 
-        // ---- 终点 ----
+        // 终点
         const epindex = parseInt(this.getAttrIgnoreCase(mp.el, 'EPIndex', '0'), 10) || 0;
         let endWpIdx;
         if (epindex > 0) endWpIdx = Math.min(epindex, wps.length - 1);
@@ -1059,21 +1061,27 @@ class EdgeCompiler {
         else endWpIdx = wps.length - 1;
         const endPathIdx = wpIndices[endWpIdx];
 
-        // ---- 模式：2/3 路点或对称 → extend；lsi<=0 → noloop；其余 → cycle ----
+        // 模式
         let mode = (this.getAttrIgnoreCase(mp.el, 'TraceMode', '') || '').toLowerCase();
         if (mode !== 'extend' && mode !== 'cycle' && mode !== 'noloop') {
             if (parentLsi <= 0)             mode = 'noloop';
-            else if (wps.length <= 3)       mode = 'extend';   // 短路径（≤3路点）默认 extend
-            else if (symmetric)             mode = 'extend';   // 对称结构 extend
-            else                            mode = 'cycle';    // 非对称长路径 cycle
+            else if (wps.length <= 3)       mode = 'extend';
+            else if (symmetric)             mode = 'extend';
+            else                            mode = 'cycle';
         }
 
         const endPause = wps[endWpIdx].pt || 0;
         const tlAttr = this.getAttrIgnoreCase(mp.el, 'TraceLength', '');
         const tracelength = (tlAttr !== '' && !isNaN(parseInt(tlAttr, 10))) ? parseInt(tlAttr, 10) : -1;
 
+        // ✅ cycle 模式：尾迹只覆盖"去程"，上限设为最远点之前
+        let trailEndIdx = endPathIdx;
+        if (mode === 'cycle' && endWpIdx > 1) {
+            trailEndIdx = wpIndices[endWpIdx - 1];
+        }
+
         const trails = [];
-        for (let j = 0; j < endPathIdx; j++) {
+        for (let j = 0; j < trailEndIdx; j++) {
             const resolvedWps = this.buildOneTrailAt({
                 wps, wpIndices, path, times,
                 j, endWpIdx, endPathIdx,
@@ -1087,12 +1095,12 @@ class EdgeCompiler {
         }
         return trails;
     }
-
     // 生成位于 path[j] 处的尾迹方块
     // 继承规则：
-    // - noloop（lsi<=0）: 继承 wps[0..endWpIdx]，中间插 path[j]，不补回程
-    // - extend（lsi>0 且短或对称）: 继承 wps[0..n]，中间插 path[j]，回程 wps[n]..wps[0]
-    // - cycle（lsi>0 且非对称）: 继承 wps[0..endWpIdx]，中间插 path[j]，不补回程
+    // - noloop：起点 TT=0，其余沿用主方块 TT，插入停留点后结束
+    // - extend：n>0 时路径点 TT=wps[k+1].tt，插入停留点，再返回 wps[n]
+    //           n=0 时起点 TT=ttStop，直接走向停留点，不返回
+    // - cycle：n=0 时起点 TT=ttStop，n>0 时起点 TT=wps[0].tt，其余沿用主方块 TT
     buildOneTrailAt(opts) {
         const {
             wps, wpIndices, path, times,
@@ -1111,77 +1119,75 @@ class EdgeCompiler {
         }
         if (n < 0) return [];
 
-        // 判断 j 是否正好落在主路点上
+        // 判断是否正好落在主路点上
         let onWpIdx = -1;
         for (let k = 0; k <= endWpIdx; k++) {
             if (j === wpIndices[k]) { onWpIdx = k; break; }
         }
 
-        // 计算从 wps[n] 到停留点的移动时间
+        // 从 wps[n] 到停留点的移动时间
         let ttStop = 0;
         if (onWpIdx < 0) {
             const depart = times[wpIndices[n]] + (wps[n].pt || 0);
             ttStop = Math.max(0, Math.round(times[j] - depart));
         }
 
-        // 计算停留点的 PauseTime
-        let ptStop = 0;
-        if (mode === 'noloop') {
-            ptStop = Math.max(0, Math.round(times[endPathIdx] + endPause - times[j]));
-        } else if (mode === 'extend') {
-            ptStop = Math.max(0, Math.round((times[endPathIdx] - times[j]) * 2 + endPause));
-        } else { // cycle
-            let aheadTime;
-            if (tracelength < 0) {
-                aheadTime = times[endPathIdx];
-            } else if (j + tracelength < times.length) {
-                aheadTime = times[j + tracelength];
-            } else {
-                const segLen = wpIndices[n + 1] - wpIndices[n];
-                const segTT = wps[n + 1].tt || 0;
-                const speed = segLen > 0 ? segTT / segLen : 0;
-                aheadTime = times[j] + tracelength * speed;
-            }
-            ptStop = Math.max(0, Math.round(aheadTime - times[j]));
+        // mainPeriod = wps[0].pt + Σ(tt_k+pt_k) + lastWp.tt
+        let mainPeriod = (wps[0].pt || 0);
+        for (let k = 1; k < wps.length; k++) {
+            mainPeriod += (wps[k].tt || 0) + (wps[k].pt || 0);
         }
+        mainPeriod += (wps[wps.length - 1].tt || 0);
 
         // ---- 组装 ----
+        const effectiveN = (onWpIdx >= 0) ? onWpIdx : n;
         const out = [];
 
-        // 添加 wps[0] 到 wps[n]
-        for (let k = 0; k <= n; k++) {
-            if (k === 0) {
-                let tt0 = 0;
-                if ((mode === 'extend' || mode === 'cycle') && n === 0) {
-                    tt0 = ttStop; // n=0 时回程时间即为 ttStop
+        for (let k = 0; k <= effectiveN; k++) {
+            let tt;
+            if (mode === 'noloop') {
+                tt = (k === 0) ? 0 : (wps[k].tt || 0);
+            } else if (mode === 'extend') {
+                if (n === 0 && onWpIdx < 0 && k === 0) tt = ttStop;
+                else tt = wps[k].tt || 0;
+            } else { // cycle
+                if (k === 0) {
+                    // ✅ 仅当尾迹停在路点之间时才用 ttStop
+                    tt = (n === 0 && onWpIdx < 0) ? ttStop : (wps[0].tt || 0);
                 } else {
-                    tt0 = wps[0].tt || 0;
+                    tt = wps[k].tt || 0;
                 }
-                out.push({ pos: { ...wps[0].pos }, tt: tt0, pt: wps[0].pt || 0 });
-            } else {
-                out.push({ pos: { ...wps[k].pos }, tt: wps[k].tt || 0, pt: wps[k].pt || 0 });
             }
+            out.push({ pos: { ...wps[k].pos }, tt, pt: wps[k].pt || 0 });
         }
 
-        // 添加停留点
-        if (onWpIdx < 0) {
-            out.push({ pos: { ...path[j] }, tt: ttStop, pt: ptStop });
+        // 停留点位置记录
+        let stopOutIdx;
+        if (onWpIdx >= 0) {
+            stopOutIdx = onWpIdx;
         } else {
-            let found = false;
-            for (let item of out) {
-                if (item.pos.x === wps[onWpIdx].pos.x && item.pos.y === wps[onWpIdx].pos.y && item.pos.z === wps[onWpIdx].pos.z) {
-                    item.pt = ptStop;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                out.push({ pos: { ...wps[onWpIdx].pos }, tt: wps[onWpIdx].tt || 0, pt: ptStop });
+            out.push({ pos: { ...path[j] }, tt: ttStop, pt: 0 });
+            stopOutIdx = out.length - 1;
+        }
+
+        // cycle 回程：n>0 且停留点在路点之间，先回 wps[n] 再回 wps[n-1..1]
+        if (mode === 'cycle' && n > 0 && onWpIdx < 0) {
+            out.push({
+                pos: { ...wps[n].pos },
+                tt: ttStop,
+                pt: this.getLastPt(wps, wps[n].pos)
+            });
+            for (let k = n - 1; k >= 1; k--) {
+                out.push({
+                    pos: { ...wps[k].pos },
+                    tt: wps[k + 1].tt || 0,
+                    pt: this.getLastPt(wps, wps[k].pos)
+                });
             }
         }
 
-        // ---- extend 补回程（仅当 n > 0 时） ----
-        if (mode === 'extend' && n > 0) {
+        // extend 回程：含回 wps[0]
+        if (mode === 'extend' && n > 0 && onWpIdx < 0) {
             for (let k = n; k >= 1; k--) {
                 out.push({
                     pos: { ...wps[k].pos },
@@ -1196,8 +1202,25 @@ class EdgeCompiler {
             });
         }
 
+        // ---- PauseTime ----
+        let ptStop = 0;
+        if (mode === 'noloop') {
+            ptStop = Math.max(0, Math.round(times[endPathIdx] + endPause - times[j]));
+        } else if (mode === 'extend') {
+            ptStop = Math.max(0, Math.round((times[endPathIdx] - times[j]) * 2 + endPause));
+        } else { // cycle —— 用主周期扣掉其他所有时间（★排除 stopOutIdx 自己的 PT）
+            let totalTime = 0;
+            for (let i = 0; i < out.length; i++) {
+                totalTime += (out[i].tt || 0);
+                if (i !== stopOutIdx) totalTime += (out[i].pt || 0);
+            }
+            ptStop = Math.max(0, Math.round(mainPeriod - totalTime));
+        }
+
+        out[stopOutIdx].pt = ptStop;
         return out;
     }
+
     // 追加尾迹方块的"后半段"
     appendTail(out, opts) {
         const {
