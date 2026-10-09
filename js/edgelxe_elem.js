@@ -121,6 +121,7 @@ const state = {
 	},
 	isDrawing: false,
 	autoName: true,
+    keepPrevProps: true,
 	_idCounters: {},
 	levelUseAngle: false,
 	spatialIndex: new Map(),
@@ -138,6 +139,7 @@ const state = {
         msIncludeEmpty: false,     // ★ 多选时是否包含空格子
         pasteOverwrite: false,     // ★ 粘贴时是否覆盖目标位置原有元素
     },
+    _lastSelectionBox: null,   // ★ 最近一次框选范围 {minX,minY,minZ,maxX,maxY,maxZ}
 };
 
 // 渲染节流
@@ -391,7 +393,7 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
 
 function addWaypointAt(m, x, y, z) {
     if (!m.waypoints) m.waypoints = [];
-    const keep = document.getElementById('keepPrevProps').checked;
+    const keep = state.keepPrevProps;
     let newWp = { x, y, z, travelTime: 0, pauseTime: 0 };
     if (keep && m.waypoints.length > 0) {
         const last = m.waypoints[m.waypoints.length - 1];
@@ -906,14 +908,14 @@ function deleteElement(type, id) {
         if (idx !== -1) {
             const elemToDelete = targetArr[idx];
 
-            // ★ 如果是移动平台，先解绑所有附着的按钮和子按钮
             if (type === 'moving') {
                 const mp = elemToDelete;
-                const pos = getMovingPos(mp);   // 获取移动平台当前位置
+                const pos = getMovingPos(mp);
 
-                // 解绑普通按钮
                 state.buttons.forEach(btn => {
-                    if (btn.movingPlatformID === mp.xmlId || btn.movingPlatformID === mp.id) {
+                    // ★ 先判断 btn.movingPlatformID 非空
+                    if (btn.movingPlatformID &&
+                        (btn.movingPlatformID === mp.xmlId || btn.movingPlatformID === mp.id)) {
                         btn.x = pos.x;
                         btn.y = pos.y;
                         btn.z = pos.z + 1;
@@ -921,11 +923,11 @@ function deleteElement(type, id) {
                     }
                 });
 
-                // 解绑按钮序列中的子按钮
                 state.buttonSequences.forEach(seq => {
                     if (seq.buttons) {
                         seq.buttons.forEach(btn => {
-                            if (btn.movingPlatformID === mp.xmlId || btn.movingPlatformID === mp.id) {
+                            if (btn.movingPlatformID &&
+                                (btn.movingPlatformID === mp.xmlId || btn.movingPlatformID === mp.id)) {
                                 btn.position = { x: pos.x, y: pos.y, z: pos.z + 1 };
                                 btn.movingPlatformID = '';
                             }
@@ -1052,15 +1054,19 @@ function placeMoving(x, y, z) {
     expandCanvasRangeForPoint(x, y, z);
     if (checkExist(state.movingPlatforms, x, y, z, '该位置已有移动平台', getMovingPos)) return;
 
-    const keep = document.getElementById('keepPrevProps').checked;
-    const autoName = document.getElementById('autoNameCheck').checked;
+    const keep = state.keepPrevProps;
+    const autoName = state.autoName;
 
     // ★ 先决定路点：如果有上次可复用 → 直接生成完整 waypoints
     let waypoints = null;
     let baseProps = {};
     if (keep && state.movingPlatforms.length > 0) {
         const last = state.movingPlatforms[state.movingPlatforms.length - 1];
-        const propsToKeep = ['autoStart', 'loopStartIndex', 'fullBlock', 'relatedTo', 'offset'];
+        const propsToKeep = ['autoStart', 'loopStartIndex', 'fullBlock'];
+        // ★ 只在统一运动开启时才继承 relatedTo / offset
+        if (state.unifiedMovement.enabled) {
+            propsToKeep.push('relatedTo', 'offset');
+        }
         propsToKeep.forEach(prop => {
             if (prop in last) baseProps[prop] = last[prop];
         });
@@ -1109,6 +1115,12 @@ function placeMoving(x, y, z) {
             newM.hideWaypoints = true;
         }
     }
+    
+    // ★ 统一运动关闭时，强制清空 relatedTo / offset
+    if (!state.unifiedMovement.enabled) {
+        newM.relatedTo = '';
+        newM.offset = '';
+    }
 
     state.movingPlatforms.push(newM);
     // ★ 遍历所有路点扩展画布范围
@@ -1125,7 +1137,7 @@ function placeFalling(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.fallingPlatforms, x, y, z, '该位置已有掉落平台')) return;
 		// ===== 新增：保留上次属性（复制所有非标识属性） =====
-		const keep = document.getElementById('keepPrevProps').checked;
+		const keep = state.keepPrevProps;
 		let baseProps = {};
 		if (keep && state.fallingPlatforms.length > 0) {
 			const last = state.fallingPlatforms[state.fallingPlatforms.length - 1];
@@ -1152,7 +1164,7 @@ function placePrism(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.prisms, x, y, z, '该位置已有棱柱')) return;
 		// ===== 新增：保留上次属性 =====
-		const keep = document.getElementById('keepPrevProps').checked;
+		const keep = state.keepPrevProps;
 		let baseProps = {};
 		if (keep && state.prisms.length > 0) {
 			const last = state.prisms[state.prisms.length - 1];
@@ -1183,7 +1195,7 @@ function placeResizer(x, y, z, type) {
         if (exist) { showToast('该位置已有同类型尺寸调整器'); return; }
     }
 		// ===== 新增：保留上次属性 =====
-		const keep = document.getElementById('keepPrevProps').checked;
+		const keep = state.keepPrevProps;
 		let baseProps = {};
 		if (keep && state.resizers.length > 0) {
 			const last = state.resizers[state.resizers.length - 1];
@@ -1207,20 +1219,24 @@ function placeResizer(x, y, z, type) {
 function placeBumper(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.bumpers, x, y, z, '该位置已有撞击器')) return;
-		// ===== 新增：保留上次属性 =====
-		const keep = document.getElementById('keepPrevProps').checked;
-		let baseProps = {};
-		if (keep && state.bumpers.length > 0) {
-			const last = state.bumpers[state.bumpers.length - 1];
-			// 可保留的属性列表
-			const propsToKeep = ['enabled'];
-			propsToKeep.forEach(prop => {
-				if (prop in last) baseProps[prop] = last[prop];
-			});
-		}
-		// ===== 新增结束 =====
+    // ===== 新增：保留上次属性（含四个方向子元素） =====
+    const keep = state.keepPrevProps;              // ★ 读 state
+    let baseProps = {};
+    if (keep && state.bumpers.length > 0) {
+        const last = state.bumpers[state.bumpers.length - 1];
+        // 顶层属性
+        const propsToKeep = ['enabled'];
+        propsToKeep.forEach(prop => {
+            if (prop in last) baseProps[prop] = last[prop];
+        });
+        // ★ 四个方向子元素（深拷贝，避免后续修改互相污染）
+        ['north', 'east', 'south', 'west'].forEach(dir => {
+            if (last[dir]) baseProps[dir] = { ...last[dir] };
+        });
+    }
+    // ===== 新增结束 =====
 	const internalId = generateInternalId('B');
-	const autoName = document.getElementById('autoNameCheck').checked;
+	const autoName = state.autoName;
 	const defaultDir = { startDelay: 0, pulseRate: 0 };
 	state.bumpers.push({
 		id: internalId,
@@ -1245,7 +1261,7 @@ function placeCheckpoint(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.checkpoints, x, y, z, '该位置已有存档点')) return;
 		// ===== 新增：保留上次属性 =====
-		const keep = document.getElementById('keepPrevProps').checked;
+		const keep = state.keepPrevProps;
 		let baseProps = {};
 		if (keep && state.checkpoints.length > 0) {
 			const last = state.checkpoints[state.checkpoints.length - 1];
@@ -1270,7 +1286,7 @@ function placeCameraTrigger(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.cameraTriggers, x, y, z, '该位置已有相机触发')) return;
 		// ===== 新增：保留上次属性 =====
-		const keep = document.getElementById('keepPrevProps').checked;
+		const keep = state.keepPrevProps;
 		let baseProps = {};
 		if (keep && state.cameraTriggers.length > 0) {
 			const last = state.cameraTriggers[state.cameraTriggers.length - 1];
@@ -1309,7 +1325,7 @@ function placeButton(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.buttons, x, y, z, '该位置已有按钮')) return;
 		// ===== 新增：保留上次属性 =====
-		const keep = document.getElementById('keepPrevProps').checked;
+		const keep = state.keepPrevProps;
 		let baseProps = {};
 		if (keep && state.buttons.length > 0) {
 			const last = state.buttons[state.buttons.length - 1];
@@ -1321,7 +1337,7 @@ function placeButton(x, y, z) {
 		}
 		// ===== 新增结束 =====
 	const internalId = generateInternalId('Btn');
-	const autoName = document.getElementById('autoNameCheck').checked;
+	const autoName = state.autoName;
 	state.buttons.push({
 		id: internalId,
 		xmlId: autoName ? generateUniqueXmlId(internalId) : '',
@@ -1349,7 +1365,7 @@ function placeOtherCube(x, y, z) {
 	if (checkExist(state.otherCubes, x, y, z, '该位置已有提示方块触发点',
         m => ({ x: m.triggerX, y: m.triggerY, z: m.triggerZ }))) return;
 		// ===== 新增：保留上次属性 =====
-		const keep = document.getElementById('keepPrevProps').checked;
+		const keep = state.keepPrevProps;
 		let baseProps = {};
 		if (keep && state.otherCubes.length > 0) {
 			const last = state.otherCubes[state.otherCubes.length - 1];
@@ -1395,7 +1411,7 @@ function placeDarkCube(x, y, z) {
 	if (checkExist(state.darkCubes, x, y, z, '该位置已有黑暗方块触发点',
         m => ({ x: m.triggerX, y: m.triggerY, z: m.triggerZ }))) return;
 		// ===== 新增：保留上次属性 =====
-		const keep = document.getElementById('keepPrevProps').checked;
+		const keep = state.keepPrevProps;
 		let baseProps = {};
 		if (keep && state.darkCubes.length > 0) {
 			const last = state.darkCubes[state.darkCubes.length - 1];
@@ -1457,7 +1473,7 @@ window.addButtonSequenceButton = function(parentId) {
 	if (!parent) return;
 	if (!parent.buttons) parent.buttons = [];
 	const internalId = generateInternalId('SB');
-	const autoName = document.getElementById('autoNameCheck').checked;
+	const autoName = state.autoName;
 	parent.buttons.push({
 		id: internalId,
 		xmlId: autoName ? generateUniqueXmlId(internalId) : '',
@@ -1870,7 +1886,7 @@ window.addWaypoint = function(id) {
     const m = state.movingPlatforms.find(p => p.id === id);
     if (!m) return;
     if (!m.waypoints) m.waypoints = [];
-    const keep = document.getElementById('keepPrevProps').checked;
+    const keep = state.keepPrevProps;
     const last = m.waypoints[m.waypoints.length - 1] || { x: 0, y: 0, z: 0, travelTime: 30 };
     const newWp = {
         x: Math.min(last.x + 1, state.level.size.w - 1),
@@ -2177,7 +2193,7 @@ window.updateInternalId = function(internalId, type, newId) {
 	}
 	elem.id = candidate;
 	// 自动同步xmlid（如果启用自动命名且类型是 moving/bumper/button）
-	const autoName = document.getElementById('autoNameCheck').checked;
+	const autoName = state.autoName;
 	if (autoName && (type === 'moving' || type === 'bumper' || type === 'button')) {
 		let xmlCandidate = candidate;
 		let xmlCounter = 0;

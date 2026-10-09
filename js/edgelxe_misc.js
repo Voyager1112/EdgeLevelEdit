@@ -2238,6 +2238,8 @@ function setCanvasEditMode(mode) {
     state.canvasEditMode = mode;
     const cb = document.getElementById('canvasAddMode');
     if (cb) cb.checked = (mode === 'add');
+    saveCache();
     showToast(mode === 'select' ? '编辑模式：选择' : '编辑模式：添加');
 }
+
 window.setCanvasEditMode = setCanvasEditMode;

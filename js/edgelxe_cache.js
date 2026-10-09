@@ -26,6 +26,9 @@ function saveCache() {
 			levelUseAngle: state.levelUseAngle,
 			autoName: state.autoName,
             settings: state.settings,
+            autoName: state.autoName,
+            keepPrevProps: state.keepPrevProps,
+            canvasEditMode: state.canvasEditMode,
         };
         const str = JSON.stringify(data);
         localStorage.setItem(CACHE_KEY, str);
@@ -84,6 +87,8 @@ function loadCache() {
 		}
 		if (state.drawMode === undefined) state.drawMode = 'single';
 		if (state.autoName === undefined) state.autoName = true;
+        if (state.keepPrevProps === undefined) state.keepPrevProps = true;
+        if (state.canvasEditMode === undefined) state.canvasEditMode = 'select';
 		if (state.staticColor === undefined) state.staticColor = null;
 		if (state.visibility === undefined) {
 			state.visibility = {

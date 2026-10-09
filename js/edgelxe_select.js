@@ -77,6 +77,20 @@ function applySelectionFromBox() {
     const y1 = Math.max(_selBox.y0, _selBox.y1);
     const z = state.currentLayer;
 
+    // ★ 无论框里有没有东西，都记下这次框选矩形
+    state._lastSelectionBox = {
+        minX: x0, minY: y0, minZ: z,
+        maxX: x1, maxY: y1, maxZ: z
+    };
+    // ★ 同步到粘贴输入框，用户能看到当前目标位置
+    requestAnimationFrame(() => {
+        const ix = document.getElementById('batchPasteX');
+        const iy = document.getElementById('batchPasteY');
+        const iz = document.getElementById('batchPasteZ');
+        if (ix) ix.value = x0;
+        if (iy) iy.value = y0;
+        if (iz) iz.value = z;
+    });
     state.multiSelection = [];
     const seen = new Set();
     const layer = state.staticBlocks[z];
@@ -115,32 +129,48 @@ function applySelectionFromBox() {
             }
         }
     }
-    showToast(`已选中 ${state.multiSelection.length} 个元素`);
+    const realCount = state.multiSelection.filter(it => it.type !== 'empty').length;
+    const emptyCount = state.multiSelection.length - realCount;
+    if (realCount === 0 && emptyCount === 0) {
+        showToast('未选中任何内容');
+    } else if (realCount === 0) {
+        showToast(`已选中 ${emptyCount} 个空格`);
+    } else if (emptyCount > 0) {
+        showToast(`已选中 ${realCount} 个元素 + ${emptyCount} 个空格`);
+    } else {
+        showToast(`已选中 ${realCount} 个元素`);
+    }
 }
 
 // ---------- 批量编辑面板 ----------
 function showSelectionPanel() {
     const pc = document.getElementById('panelContent');
     if (!pc) return;
-    const n = state.multiSelection.length;
-    if (n === 0) {
+    // ★ 只统计实际元素（empty 不算）
+    const elementSel = state.multiSelection.filter(it => it.type !== 'empty');
+    const n = elementSel.length;
+    const emptyN = state.multiSelection.length - n;
+
+    if (n === 0 && emptyN === 0) {
         pc.innerHTML = '<div class="empty-msg">未选中任何元素</div>';
         return;
     }
 
-    const types = new Set(state.multiSelection.map(it => it.type));
-    const uniform = types.size === 1 ? [...types][0] : null;
+    // 判断 uniform 时也只用实际元素
+    const realTypes = new Set(elementSel.map(it => it.type));
+    const uniform = realTypes.size === 1 ? [...realTypes][0] : null;
 
     const counts = {};
-    state.multiSelection.forEach(it => { counts[it.type] = (counts[it.type] || 0) + 1; });
+    elementSel.forEach(it => { counts[it.type] = (counts[it.type] || 0) + 1; });
     const summary = Object.entries(counts).map(([t, c]) => `${t}:${c}`).join(' · ');
 
     let html = `
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
             <span class="color-dot" style="background:#ffd700;"></span>
             <strong>多选：${n} 个</strong>
+            ${emptyN > 0 ? `<span style="font-size:11px;color:#5a7a9a;">(含 ${emptyN} 空格)</span>` : ''}
         </div>
-        <div style="font-size:11px; color:#8aaccc; margin-bottom:8px;">${summary}</div>
+        <div style="font-size:11px; color:#8aaccc; margin-bottom:8px;">${summary || (emptyN > 0 ? '（仅空格）' : '')}</div>
 
         <div class="prop-row">
             <button class="add-btn" onclick="batchShiftSelection(1,0,0)">X+1</button>
@@ -193,10 +223,6 @@ function showSelectionPanel() {
             <div class="sub-title">复制 / 粘贴</div>
             <div class="prop-row">
                 <button class="add-btn" onclick="batchCopyToClipboard()">📄 复制选区</button>
-            </div>
-            <div class="prop-row">
-                <button class="add-btn" onclick="batchSetPasteTargetFromSelection()"
-                        title="把选区左上角作为粘贴落点">🎯 用选区左上角作目标</button>
             </div>
             <div class="prop-row">
                 <label>粘贴到</label>
@@ -361,9 +387,9 @@ function findElementByTypeAndId(type, id) {
 
 // ---------- 批量操作 API ----------
 window.batchDeleteSelection = function () {
-    const n = state.multiSelection.length;
-    if (!n) return;
-    if (!confirm(`确定删除 ${n} 个元素？`)) return;
+    const realCount = state.multiSelection.filter(it => it.type !== 'empty').length;
+    if (!realCount) { showToast('没有可删除的元素（选区内只有空格）'); return; }
+    if (!confirm(`确定删除 ${realCount} 个元素？`)) return;
 
     // ★ 关键：整个批量操作只记一次 undo
     const beforeSnap = _serializeHistory();
@@ -408,7 +434,7 @@ window.batchDeleteSelection = function () {
     updateElemList();
     updateStatus();
     uniInterface();
-    showToast(`已删除 ${n} 个元素`);
+    showToast(`已删除 ${realCount} 个元素`);
 };
 
 window.batchShiftSelection = function (dx, dy, dz) {
@@ -553,6 +579,7 @@ window.batchSetStaticRGB = function (r, g, b) {
 
 window.clearMultiSelection = function () {
     state.multiSelection = [];
+    state._lastSelectionBox = null;
     requestRender();
     updatePanel();
 };
@@ -561,12 +588,16 @@ window.clearMultiSelection = function () {
 
 // 计算多选选区的边界
 function getSelectionBounds() {
+    // ★ 优先用"最近一次框选的矩形"
+    if (state._lastSelectionBox) return state._lastSelectionBox;
+
+    // 保底：从 multiSelection 算
     if (!state.multiSelection.length) return null;
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     state.multiSelection.forEach(it => {
         let p = null;
-        if (it.coord) p = it.coord;                          // static / empty
+        if (it.coord) p = it.coord;
         else if (typeof getElementCoord === 'function') p = getElementCoord(it.type, it.id);
         if (!p) return;
         if (p.x < minX) minX = p.x;
@@ -609,7 +640,26 @@ window.batchCopyToClipboard = function () {
 
     window.QuickFill.setCopyBox(b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ);
     window.QuickFill.doCopy();
-    showSelectionPanel();   // 刷新剪贴板信息
+
+    /*//复制后清空框选与输入框，防止误粘回原位
+    state._lastSelectionBox = null;
+    state.multiSelection = [];*/
+
+    const ix = document.getElementById('batchPasteX');
+    const iy = document.getElementById('batchPasteY');
+    const iz = document.getElementById('batchPasteZ');
+    if (ix) ix.value = '';
+    if (iy) iy.value = '';
+    if (iz) iz.value = '';
+
+    // 清掉 quickfill 里的 pasteCoord，防止用旧值
+    if (window.QuickFill.setPasteCoord) {
+        window.QuickFill.setPasteCoord(0, 0, 0);   // 会被下一步覆盖
+    }
+
+    requestRender();
+    showSelectionPanel();
+    showToast('已复制。请框选目标区域后点「📥 粘贴」');
 };
 
 // 从输入框读目标坐标并粘贴
@@ -617,14 +667,34 @@ window.batchPasteAtInput = function () {
     if (!window.QuickFill || !window.QuickFill.setPasteCoord || !window.QuickFill.doPaste) {
         showToast('QuickFill 未加载'); return;
     }
-    const x = parseInt(document.getElementById('batchPasteX')?.value);
-    const y = parseInt(document.getElementById('batchPasteY')?.value);
-    const z = parseInt(document.getElementById('batchPasteZ')?.value);
+
+    const xEl = document.getElementById('batchPasteX');
+    const yEl = document.getElementById('batchPasteY');
+    const zEl = document.getElementById('batchPasteZ');
+
+    // ★ 优先输入框（applySelectionFromBox 会同步进去）
+    let x = parseInt(xEl?.value);
+    let y = parseInt(yEl?.value);
+    let z = parseInt(zEl?.value);
+    let source = '输入框';
+
     if (isNaN(x) || isNaN(y) || isNaN(z)) {
-        showToast('请填写完整的 X/Y/Z');
-        return;
+        // 回退到最近框选（且必须与当前层一致）
+        const b = state._lastSelectionBox;
+        if (b && b.minZ === state.currentLayer) {
+            x = b.minX; y = b.minY; z = b.minZ;
+            source = '框选';
+            if (xEl) xEl.value = x;
+            if (yEl) yEl.value = y;
+            if (zEl) zEl.value = z;
+        } else {
+            showToast('请先在当前层框选目标区域，或手动填写 X/Y/Z');
+            return;
+        }
     }
+
     window.QuickFill.setPasteCoord(x, y, z);
+    showToast(`粘贴目标 (${x},${y},${z}) [${source}]`);
     window.QuickFill.doPaste();
     showSelectionPanel();
 };

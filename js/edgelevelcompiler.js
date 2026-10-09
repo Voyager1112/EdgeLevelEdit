@@ -1400,7 +1400,7 @@ class EdgeCompiler {
 			if (id) usedIds.add(id);
 		});
 		let nzpvlCounter = 1;
-		mpData.forEach(mp => {
+		mpData.forEach((mp, idx) => {                       // ★ 加 idx
 			const hasRelated = this.getAttrIgnoreCase(mp.el, 'RelatedTo') != null && this.getAttrIgnoreCase(mp.el, 'RelatedTo') !== '';
 			if (hasRelated && !this.getAttrIgnoreCase(mp.el, 'ID')) {
 				let newId;
@@ -1423,6 +1423,7 @@ class EdgeCompiler {
 				if (!usedIds.has(newId)) {
 					mp.el.setAttribute('ID', newId);
 					usedIds.add(newId);
+					this.regId(newId, 'moving_platform', idx);   // ★ 关键：注册到 idMap
 					this.logInfo(`为 RelatedTo 移动平台生成 ID: ${newId}`);
 				} else {
 					this.logErr(`无法为 RelatedTo 移动平台生成唯一 ID`);

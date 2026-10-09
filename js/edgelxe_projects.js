@@ -341,13 +341,17 @@ window.PM = {
     remove(id) { deleteProject(id); renderProjectList(); },
     duplicate(id) { duplicateProjectFromUI(id); },
     exportZip(id) { exportProjectZip(id); },
-    // 供 saveCache 调用
     sync() { saveCurrentToProject(); },
-    // 供其它模块用
+
+    // ★ 新增：供其它模块（loadXMLAndPNG 等）调用
+    createProject,
+    setCurrentProjectId,
+    getCurrentProjectId,
+    saveCurrentToProject,
+    switchProject,
+    deleteProject,
     loadStore: loadProjectStore,
     saveStore: saveProjectStore,
-    getCurrentId: getCurrentProjectId,
-    setCurrentId: setCurrentProjectId
 };
 
 })();

@@ -591,9 +591,15 @@ B 通道（模型高度）
 25.拆分路点功能：可以把一个路点拆分成多个来避免traveltime太长时可能出现的回弹bug，点击拆分，输入拆分份数就可以等分路点，效果和拆分前一致，可能要注意改一下循环索引
 `;
 
-	// 转义 XML 标签
-	const escapedDoc = rawDoc.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const escapedDoc1 = rawDoc1.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // 转义 XML 标签（先 & 再 < >，顺序不能反）
+    function escapeForDisplay(s) {
+        return s
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+    const escapedDoc  = escapeForDisplay(rawDoc);
+    const escapedDoc1 = escapeForDisplay(rawDoc1);
 
 	const helpContent = `
         <div class="section">
@@ -863,6 +869,8 @@ B 通道（模型高度）
 	canvas.addEventListener('click', function(e) {
         // 添加模式下由 mousedown 负责，click 不再重复放
         if (state.canvasEditMode === 'add'/* && state.currentTool !== 'eraser'*/) return;
+        // ★ 画笔模式下 mousedown 已经处理过，click 不再重复放
+        if (state.drawMode === 'brush') return;
 		const rect = canvas.getBoundingClientRect();
 		const scaleX = canvas.width / rect.width;
 		const scaleY = canvas.height / rect.height;
@@ -1254,6 +1262,28 @@ B 通道（模型高度）
             saveCache();
         });
     })();
+    
+    // ★ 从 state 恢复工具栏勾选状态
+    (function restoreToolbarCheckboxes() {
+        const keepCb  = document.getElementById('keepPrevProps');
+        const autoCb  = document.getElementById('autoNameCheck');
+        const addCb   = document.getElementById('canvasAddMode');
+
+        if (keepCb) keepCb.checked = !!state.keepPrevProps;
+        if (autoCb) autoCb.checked = !!state.autoName;
+        if (addCb)  addCb.checked  = (state.canvasEditMode === 'add');
+
+        if (keepCb) keepCb.addEventListener('change', function () {
+            state.keepPrevProps = this.checked;
+            saveCache();
+        });
+        if (autoCb) autoCb.addEventListener('change', function () {
+            state.autoName = this.checked;
+            saveCache();
+        });
+        // canvasAddMode 已经有自己的 change handler 调 setCanvasEditMode，
+        // 只要 setCanvasEditMode 里 saveCache 一下就行（见 1.5）
+    })();
 
 	state._lastSavedSnapshot = _serializeHistory();
     state._undoStack = [];
@@ -1297,7 +1327,6 @@ B 通道（模型高度）
     document.getElementById('toolMultiSelect').addEventListener('click', () => {
         setTool('multiselect');
         state.multiSelection = [];
-        document.getElementById('msEmptyLabel').hidden = false;
         requestRender();
     });
     

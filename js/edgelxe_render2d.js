@@ -203,6 +203,24 @@ function renderGrid() {
         ctx.strokeRect(rx, ry, rw, rh);
         ctx.restore();
     }
+    
+    // ===== 多选包围框（持久保留） =====
+    if (typeof getSelectionBounds === 'function'
+        && state.multiSelection && state.multiSelection.length > 0) {
+        const b = getSelectionBounds();
+        if (b && b.minZ === b.maxZ && b.minZ === z) {
+            const rx = padding + (b.minX - minX) * pixelSize;
+            const ry = padding + (b.minY - minY) * pixelSize;
+            const rw = (b.maxX - b.minX + 1) * pixelSize;
+            const rh = (b.maxY - b.minY + 1) * pixelSize;
+            ctx.save();
+            ctx.strokeStyle = '#ffd700';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 4]);
+            ctx.strokeRect(rx, ry, rw, rh);
+            ctx.restore();
+        }
+    }
 
     // ===== 多选高亮 =====
     if (state.multiSelection && state.multiSelection.length) {

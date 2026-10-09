@@ -368,24 +368,43 @@ function loadXMLAndPNG(files) {
         showToast('未找到XML文件');
         return;
     }
-    
-    // ★ 导入模式处理
+
+    // ★ 导入模式处理：勾选"新建项目"时先建一个空项目，把当前 state 指过去
     if (state.settings && state.settings.importNewProject) {
-        if (window.PM && window.PM.sync) window.PM.sync();
-        if (typeof createProject === 'function' && typeof setCurrentProjectId === 'function') {
+        if (!window.PM || !window.PM.createProject || !window.PM.setCurrentProjectId) {
+            showToast('项目管理模块未加载，改为覆盖当前项目');
+        } else {
+            // 先把当前编辑内容存进"当前项目"，避免丢失
+            if (window.PM.sync) window.PM.sync();
+
             const baseName = xmlFile.name.replace(/\.xml$/i, '');
-            const projName = prompt('新项目名：', baseName) || baseName;
-            const pid = createProject(projName);
-            setCurrentProjectId(pid);
-            // 清空当前编辑状态，避免旧元素混入
-            if (typeof newProject === 'function') {
-                // 临时关掉保存，防止 newProject 里触发 saveCache 又把数据写回
-                const prev = state._suppressUI;
-                state._suppressUI = true;
-                newProject();
-                state._suppressUI = prev;
+            const projName = prompt('新项目名：', baseName);
+            if (projName === null) {
+                // 用户取消 → 放弃导入
+                showToast('已取消导入');
+                return;
             }
-            showToast(`已创建项目：${projName}`);
+            const finalName = projName.trim() || baseName;
+            const pid = window.PM.createProject(finalName);
+            window.PM.setCurrentProjectId(pid);
+            showToast(`已创建项目：${finalName}`);
+
+            // 清空编辑器状态，让后续 reader.onload 从干净状态开始
+            const prevSuppressUI = state._suppressUI;
+            const prevSuppressUndo = state._suppressUndo;
+            state._suppressUI = true;
+            state._suppressUndo = true;
+            try {
+                if (typeof newProject === 'function') {
+                    // newProject 内部会调 saveCache，被 suppress 拦下
+                    newProject();
+                }
+            } finally {
+                state._suppressUI = prevSuppressUI;
+                state._suppressUndo = prevSuppressUndo;
+            }
+            // newProject 里的 saveCache 被拦了，这里手动同步一次到新项目
+            if (window.PM.sync) window.PM.sync();
         }
     }
 

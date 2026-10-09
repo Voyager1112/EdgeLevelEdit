@@ -402,10 +402,6 @@ function setTool(tool) {
     if (tool !== 'multiselect' && state.multiSelection && state.multiSelection.length) {
         state.multiSelection = [];
     }
-    if (tool !== 'multiselect') {
-        const el = document.getElementById('msEmptyLabel');
-        if (el) el.hidden = true;
-    }
 	state.currentTool = tool;
 	// 清除所有工具栏按钮的高亮
 	document.querySelectorAll('.toolbar button[id^="tool"]:not(#toolSingle):not(#toolBrush)').forEach(b => b.classList.remove('active'));
@@ -676,12 +672,12 @@ function _serializeHistory() {
         darkCubes: state.darkCubes,
         unknownElements: state.unknownElements,
         nextIdCounter: state.nextIdCounter,
-        drawMode: state.drawMode,
+        _idCounters: state._idCounters,
+        /*drawMode: state.drawMode,
         staticColor: state.staticColor,
         visibility: state.visibility,
-        _idCounters: state._idCounters,
         levelUseAngle: state.levelUseAngle,
-        autoName: state.autoName
+        autoName: state.autoName,*/
     });
 }
 

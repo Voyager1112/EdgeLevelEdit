@@ -1668,8 +1668,19 @@ window.QuickFill = {
         cb.copyCoords.push({ x: maxX, y: maxY, z: maxZ });
         refreshCbCopyList();
     },
-    setPasteCoord(x, y, z) {
+    /*setPasteCoord(x, y, z) {
         cb.pasteCoord = { x, y, z };
+        refreshCbPasteInfo();
+    },*/
+    setPasteCoord(x, y, z) {
+        if (x === null || x === undefined ||
+            y === null || y === undefined ||
+            z === null || z === undefined ||
+            (typeof x === 'number' && isNaN(x))) {
+            cb.pasteCoord = null;
+        } else {
+            cb.pasteCoord = { x, y, z };
+        }
         refreshCbPasteInfo();
     },
     doCopy,
