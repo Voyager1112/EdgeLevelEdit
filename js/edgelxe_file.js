@@ -83,6 +83,17 @@ function generateXMLString() {
 		if ('fullBlock' in m) attrs += ` FullBlock="${m.fullBlock}"`;
 		if (m.relatedTo) attrs += ` RelatedTo="${m.relatedTo}"`;
 		if (m.offset) attrs += ` Offset="${m.offset}"`;
+        // ★ Trace 相关
+        if (m.trace) {
+            attrs += ` Trace="true"`;
+            if (m.traceMode) {
+                attrs += ` TraceMode="${m.traceMode}"`;
+            }
+            if (m.traceLength !== undefined && m.traceLength !== null &&
+                !isNaN(m.traceLength) && m.traceLength >= 0) {
+                attrs += ` TraceLength="${m.traceLength}"`;
+            }
+        }
 		xml += `  <MovingPlatform${attrs}>\n`;
 		if (m.waypoints && (!m.relatedTo || (m.relatedTo && !m.hideWaypoints))) {
 			m.waypoints.forEach(wp => {
@@ -558,6 +569,20 @@ function loadXMLAndPNG(files) {
 						if (relatedVal !== null) m.relatedTo = relatedVal;
 						const offsetVal = getAttrCaseInsensitive(child, 'Offset');
 						if (offsetVal !== null) m.offset = offsetVal;
+                        // ★ Trace
+                        const traceVal = getAttrCaseInsensitive(child, 'Trace');
+                        if (traceVal !== null) {
+                            m.trace = String(traceVal).toLowerCase() === 'true';
+                        }
+                        const traceModeVal = getAttrCaseInsensitive(child, 'TraceMode');
+                        if (traceModeVal !== null && traceModeVal !== '') {
+                            m.traceMode = String(traceModeVal).toLowerCase();
+                        }
+                        const traceLengthVal = getAttrCaseInsensitive(child, 'TraceLength');
+                        if (traceLengthVal !== null && traceLengthVal !== '') {
+                            const v = parseInt(traceLengthVal, 10);
+                            if (!isNaN(v)) m.traceLength = v;
+                        }
 
 						const wpNodes = getChildrenByTagNameIgnoreCase(child, 'Waypoint');
 						wpNodes.forEach(wp => {

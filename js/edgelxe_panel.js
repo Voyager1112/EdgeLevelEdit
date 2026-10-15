@@ -239,6 +239,26 @@ function updatePanel() {
 						<option value="false" ${!elem.fullBlock?'selected':''}>否</option>
 					</select>
 				</div>
+                <div class="prop-row"><label>Trace</label>
+                    <input type="checkbox" ${elem.trace ? 'checked' : ''}
+                        onchange="updateMovingProp('${elem.id}','trace',this.checked)">
+                    <span class="field-hint">启用尾迹方块生成（编译时）</span>
+                </div>
+                <div class="prop-row" style="${elem.trace ? '' : 'display:none;'}">
+                    <label>TraceMode</label>
+                    <select onchange="updateMovingProp('${elem.id}','traceMode',this.value)">
+                        <option value="" ${!elem.traceMode ? 'selected' : ''}>自动</option>
+                        <option value="cycle" ${elem.traceMode==='cycle'?'selected':''}>cycle</option>
+                        <option value="extend" ${elem.traceMode==='extend'?'selected':''}>extend</option>
+                    </select>
+                </div>
+                <div class="prop-row" style="${elem.trace ? '' : 'display:none;'}">
+                    <label>TraceLength</label>
+                    <input type="number" min="0"
+                        value="${elem.traceLength ?? ''}"
+                        placeholder="留空=整段"
+                        onchange="updateMovingProp('${elem.id}','traceLength', this.value==='' ? undefined : parseInt(this.value))">
+                </div>
 				<div class="prop-row"><label>RelatedTo</label>
 					<select onchange="updateMovingProp('${elem.id}','relatedTo',this.value)" style="flex:2;">
 						<option value="">无</option>

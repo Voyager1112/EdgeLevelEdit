@@ -1067,6 +1067,8 @@ function placeMoving(x, y, z) {
         if (state.unifiedMovement.enabled) {
             propsToKeep.push('relatedTo', 'offset');
         }
+        // ★ Trace 相关属性一并继承
+        propsToKeep.push('trace', 'traceMode', 'traceLength');
         propsToKeep.forEach(prop => {
             if (prop in last) baseProps[prop] = last[prop];
         });
