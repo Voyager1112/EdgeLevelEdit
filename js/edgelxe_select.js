@@ -183,7 +183,7 @@ function showSelectionPanel() {
             <button class="add-btn" onclick="batchShiftSelection(0,0,-1)">Z-1</button>
         </div>
         <div class="prop-row">
-            <label>原点（左上角）</label>
+            <label for="selOriginX">原点（左上角）</label>
             <input type="number" id="selOriginX" placeholder="X" style="width:50px;">
             <input type="number" id="selOriginY" placeholder="Y" style="width:50px;">
             <input type="number" id="selOriginZ" placeholder="Z" style="width:50px;">
@@ -225,7 +225,7 @@ function showSelectionPanel() {
                 <button class="add-btn" onclick="batchCopyToClipboard()">📄 复制选区</button>
             </div>
             <div class="prop-row">
-                <label>粘贴到</label>
+                <label for="batchPasteX">粘贴到</label>
                 <input type="number" id="batchPasteX" placeholder="X" style="width:50px;">
                 <input type="number" id="batchPasteY" placeholder="Y" style="width:50px;">
                 <input type="number" id="batchPasteZ" placeholder="Z" style="width:50px;">
@@ -324,15 +324,15 @@ function renderBatchPropsForType(type) {
 
     let html = `<div class="sub-elem-section"><div class="sub-title">批量修改属性（${type}）</div>`;
     props.forEach(p => {
-        html += `<div class="prop-row"><label>${p.label}</label>`;
+        html += `<div class="prop-row"><label for="">${p.label}</label>`;
         if (p.type === 'bool') {
-            html += `<select onchange="if(this.value!=='') batchSetProp('${type}','${p.key}',this.value==='true')">
+            html += `<select name="select" onchange="if(this.value!=='') batchSetProp('${type}','${p.key}',this.value==='true')">
                 <option value="">不变</option>
                 <option value="true">是</option>
                 <option value="false">否</option>
             </select>`;
         } else if (p.type === 'int') {
-            html += `<input type="number" placeholder="留空不变"
+            html += `<input name="input" type="number" placeholder="留空不变"
                 onchange="if(this.value!=='') batchSetProp('${type}','${p.key}',parseInt(this.value))">`;
         } else if (p.type === 'tri') {
             html += `<select onchange="if(this.value!=='') batchSetProp('${type}','${p.key}', this.value==='__nul' ? null : (this.value==='true'))">

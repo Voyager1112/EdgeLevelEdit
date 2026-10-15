@@ -938,3 +938,47 @@ height: 12px;
 #elemListContainer::-webkit-scrollbar {
 width: 12px;
 }
+
+/* ============================================================
+   🖥️ 电脑模式：底部显示控制水平排列
+   ============================================================ */
+#visibilityArea {
+    display: block;
+    background: #0d0d1f;
+    border-top: 1px solid #1a2a3a;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+#visibilityCheckboxes {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 6px 14px !important;
+    font-size: 12px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+/* ★ 关键：label 用 inline-flex，不再独占一行 */
+#visibilityCheckboxes > label {
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    align-items: center !important;
+    gap: 4px !important;
+    color: #ccc !important;
+    font-size: 12px !important;
+    white-space: nowrap !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+}
+#visibilityCheckboxes > label > input[type="checkbox"] {
+    width: 14px !important;
+    height: 14px !important;
+    margin: 0 !important;
+    flex-shrink: 0 !important;
+}
