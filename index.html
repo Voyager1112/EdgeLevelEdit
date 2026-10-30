@@ -43,6 +43,7 @@
             <button id="settingsBtn">⚙ 设置</button>
 			<button id="helpBtn">帮助</button>
             <div class="sep"></div>
+            <a href="./misc/pic2lvlmap.html">图片转关卡地图</a>
 			<a href="./misc/levelgen.html">关卡生成器</a>
 			<a href="./misc/profedit.html" type="text/html">移动版存档编辑器</a>
         </div>
@@ -241,8 +242,11 @@
                     <label style="margin-left:16px;">
                         <input type="checkbox" id="compilePhoneMode"> 编译手机版（时间阈值×100）
                     </label>
-                        <input type="checkbox" id="compileLayeredTexture" checked> 原版风格模型
-                        <input type="checkbox" id="compileSkipEso"> 不生成 ESO 模型
+                    <label>
+                    <input type="checkbox" id="compileLayeredTexture" checked> 原版风格模型
+                    </label>
+                    <label>
+                    <input type="checkbox" id="compileSkipEso"> 不生成 ESO 模型
                     </label>
                 </div>
 			</div>
@@ -250,20 +254,18 @@
 			<!-- XML 选择器（新增） -->
 			<div style="margin-bottom:12px;">
 				<label for="compileXmlInput">拖入/选择 XML / ZIP 文件：</label>
-				<button id="clearXmlBtn" class="cancel-btn" style="padding:2px 8px;">清除XML / ZIP</button>
+				<button id="clearXmlBtn" class="cancel-btn" style="background:#2a5a7a; border:1px solid #4a8aba; color:#eee; padding:4px 12px; border-radius:4px; cursor:pointer;">清除XML / ZIP</button>
 				<input type="file" id="compileXmlInput" accept=".xml,.zip" style="display:block; margin-top:4px; background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:4px; border-radius:4px; width:100%;">
 			</div>
 
 			<div style="margin-bottom:12px;">
 				<label for="compilePngInput">拖入/选择 PNG 层文件（可多选）：</label>
-				<button id="clearPngBtn" class="cancel-btn" style="padding:2px 8px;">清除PNG</button>
+				<button id="clearPngBtn" class="cancel-btn" style="background:#2a5a7a; border:1px solid #4a8aba; color:#eee; padding:4px 12px; border-radius:4px; cursor:pointer;">清除PNG</button>
 				<input type="file" id="compilePngInput" accept=".png" multiple style="display:block; margin-top:4px; background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:4px; border-radius:4px; width:100%;">
 			</div>
-			<div style="margin-top:8px;">
-				<button id="clearAllBtn" class="cancel-btn" style="padding:4px 12px;">清除全部</button>
-			</div>
 			<div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
-				<button id="importCurrentBtn" style="background:#0f3460; border:1px solid #1a4a7a; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">📥 导入当前关卡</button>
+                <button id="clearAllBtn" class="cancel-btn" style="background:#a03030; border:1px solid #a03030; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">清除全部</button>
+				<button id="importCurrentBtn" style="background:#2a5a7a; border:1px solid #4a8aba; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">📥 导入当前关卡</button>
 				<button id="compileImportBtn" style="background:#2a5a7a; border:1px solid #4a8aba; color:#eee; padding:6px 16px; border-radius:4px; cursor:pointer;">📂 编译</button>
 			</div>
 			
