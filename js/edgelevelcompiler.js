@@ -78,28 +78,40 @@ class BinWriter {
 }
 
 // 主题配置
+/*主题0：level309 1st contact
+NodeChild="30A65A78050DB82A"，MaterialAsset="78A81752050DB82A"
+
+主题1：level300 training
+NodeChild="2FE94153050DB82A"，MaterialAsset="67E70C79050DB82A"
+
+主题2：level301 metro
+NodeChild="E34341CD050DB82A"，MaterialAsset="AB4D0CE7050DB82A"
+
+主题3：hammer_810 hammer
+NodeChild="81BDC987050DB82A"，MaterialAsset="E6BB708C050DB82A"
+*/
 const THEME_CONFIG = {
     0: {
-        nodeChild: '67228D77050DB82A',
-        material: '2F2CC05D050DB82A',
+        nodeChild: '30A65A78050DB82A',
+        material: '78A81752050DB82A',
         translate: { x: 53.5, y: 2.25, z: -46 },
         scale: 0.1
     },
     1: {
-        nodeChild: '1DE2AE87050DB82A',
-        material: '55ECE3AD050DB82A',
+        nodeChild: '2FE94153050DB82A',
+        material: '67E70C79050DB82A',
         translate: { x: 89.5, y: 2.25, z: -90 },
         scale: 0.1
     },
     2: {
-        nodeChild: '8A7DBFAE050DB82A',
-        material: 'C273F284050DB82A',
+        nodeChild: 'E34341CD050DB82A',
+        material: 'AB4D0CE7050DB82A',
         translate: { x: 43, y: 2.25, z: -32.5 },
         scale: 0.1
     },
     3: {
-        nodeChild: '451F8839050DB82A',
-        material: '0D11C513050DB82A',
+        nodeChild: '81BDC987050DB82A',
+        material: 'E6BB708C050DB82A',
         translate: { x: 30, y: 2.25, z: -74.5 },
         scale: 0.1
     }
@@ -610,8 +622,9 @@ function generateESOFromPngs(xmlDoc, pngs, theme, internalFileName, layeredMode)
                 const p3 = `${x1},${yTop},${z1}`;
                 const p4 = `${x1},${yTop},${z0}`;
                 const n = '1,0,0';
-                triangles.push(`    <Triangle>\n      <Vertex Position="${p1}" Normal="${n}" TexCoord="0.49,${vBot}" />\n      <Vertex Position="${p2}" Normal="${n}" TexCoord="0.26,${vBot}" />\n      <Vertex Position="${p4}" Normal="${n}" TexCoord="0.26,${vTop}" />\n    </Triangle>`);
-                triangles.push(`    <Triangle>\n      <Vertex Position="${p2}" Normal="${n}" TexCoord="0.49,${vBot}" />\n      <Vertex Position="${p3}" Normal="${n}" TexCoord="0.26,${vTop}" />\n      <Vertex Position="${p4}" Normal="${n}" TexCoord="0.49,${vTop}" />\n    </Triangle>`);
+                triangles.push(`    <Triangle>\n      <Vertex Position="${p1}" Normal="${n}" TexCoord="0.49,${vBot}" />\n      <Vertex Position="${p2}" Normal="${n}" TexCoord="0.26,${vBot}" />\n      <Vertex Position="${p4}" Normal="${n}" TexCoord="0.49,${vTop}" />\n    </Triangle>`);
+                triangles.push(`    <Triangle>\n      <Vertex Position="${p2}" Normal="${n}" TexCoord="0.26,${vBot}" />\n      <Vertex Position="${p3}" Normal="${n}" TexCoord="0.26,${vTop}" />\n      <Vertex Position="${p4}" Normal="${n}" TexCoord="0.49,${vTop}" />\n    </Triangle>`);
+                //原来这几个Vertex的TexCoord第一项是0.49，0.26，0.26 0.49，0.26，0.49
             }
 
             // 南面

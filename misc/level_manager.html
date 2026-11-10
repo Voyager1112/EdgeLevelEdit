@@ -446,7 +446,7 @@
 
         window.deleteLevel = async function(segment, index, encodedFilename) {
             const filename = decodeURIComponent(encodedFilename); // ★ 加上这行
-            if (!confirm(`确定要彻底删除关卡 ${filename} 吗？\n这将会删除对应的物理文件(层级、模型)。`)) return;
+            if (!confirm(`确定要彻底删除关卡 ${filename} 吗？\n这将会删除对应的物理文件(bin关卡、eso模型)。`)) return;
             
             await ipcRenderer.invoke('delete-level-files', currentGameDir, filename);
             
