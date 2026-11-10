@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script>
+    try { if (localStorage.getItem('edgeEditorDarkMode') === '1') document.documentElement.classList.add('dark'); } catch(e){}
+    </script>
+    <meta charset="UTF-8">
+    <title>EDGE 关卡管理器</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root{
+            --bg: #ffffff; --bg-toolbar: #f3f3f3; --bg-panel: #f7f7f7;
+            --bg-hover: #eaf3fb; --bg-active: #d6e8f8;
+            --border: #dcdcdc; --border-strong: #bcbcbc;
+            --text: #1b1b1b; --text-dim: #616161; --text-faint: #8a8a8a;
+            --accent: #0067c0; --accent-hover: #0a76cf; --accent-soft: #e5f1fb;
+            --danger: #c42b1c;
+            --scroll-track: #f2f2f2; --scroll-thumb: #c2c2c2;
+        }
+        html.dark {
+            --bg: #1e1e1e; --bg-toolbar: #2d2d2d; --bg-panel: #252526;
+            --bg-hover: #2a3a4a; --bg-active: #1a4a6a;
+            --border: #3c3c3c; --border-strong: #4a4a4a;
+            --text: #e0e0e0; --text-dim: #a0a0a0; --text-faint: #707070;
+            --accent: #4fc3f7; --accent-hover: #6dd0ff; --accent-soft: #1a3a5a;
+            --danger: #e05a4a;
+            --scroll-track: #252525; --scroll-thumb: #4a4a4a;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            background: var(--bg); color: var(--text);
+            font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+            font-size: 13px; display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+        }
+        ::-webkit-scrollbar { width:12px; height:12px; }
+        ::-webkit-scrollbar-track { background:var(--scroll-track); }
+        ::-webkit-scrollbar-thumb { background:var(--scroll-thumb); border:3px solid var(--scroll-track); }
+        ::-webkit-scrollbar-thumb:hover { background:var(--scroll-thumb); }
+
+        input[type="text"], input[type="number"], select {
+            font-family: inherit; font-size: 12px; color: var(--text); background: var(--bg);
+            border: 1px solid var(--border-strong); padding: 2px 5px; height: 22px;
+            outline: none; border-radius: 0;
+        }
+        input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+        input[type="checkbox"] { width: 13px; height: 13px; accent-color: var(--accent); margin: 0; vertical-align: -2px; }
+        button {
+            font-family: inherit; font-size: 12px; color: var(--text); background: var(--bg-toolbar);
+            border: 1px solid var(--border-strong); padding: 3px 10px; height: 24px;
+            line-height: 16px; cursor: pointer; border-radius: 0; white-space: nowrap;
+            transition: background .12s, border-color .12s;
+        }
+        button:hover { background: var(--bg-hover); border-color: var(--accent); }
+        button:active { background: var(--bg-active); }
+        button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+        button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+        button.btn-danger { color: var(--danger); border-color: var(--danger); background: var(--bg); }
+        button.btn-danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+        button.btn-sm { padding: 1px 6px; height: 20px; font-size: 11px; }
+        
+        .toolbar {
+            background: var(--bg-toolbar); border-bottom: 1px solid var(--border-strong);
+            padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; z-index: 10;
+        }
+        .tb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        .tb-label { color: var(--text-dim); font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+        .sep { width: 1px; height: 18px; background: var(--border-strong); margin: 0 4px; }
+        
+        .drop-zone {
+            border: 2px dashed var(--border-strong); padding: 10px; text-align: center;
+            color: var(--text-dim); background: var(--bg-panel); transition: 0.2s;
+        }
+        .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+        .table-container { flex: 1; overflow: auto; background: var(--bg-panel); }
+        /* ★ 新增：用 inner 来给表格留边距，滚动条和吸附在外层计算 */
+        .table-inner { padding: 12px; }
+        
+        table { width: 100%; border-collapse: collapse; background: var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; font-size: 12px; }
+        th { background: var(--bg-toolbar); position: sticky; top: 0; font-weight: 600; z-index: 10; }
+        tr:hover { background: var(--bg-hover); }
+        tr.active { background: var(--bg-active); }
+        tr.group-header { background: var(--accent-soft); font-weight: bold; font-size: 13px; }
+        tr.group-header td { border-bottom: 2px solid var(--accent); }
+        
+        td input[type="number"] { width: 60px; }
+        .cell-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+        .status-bar {
+            flex-shrink: 0; background: var(--bg-toolbar); border-top: 1px solid var(--border-strong);
+            padding: 4px 12px; font-size: 12px; color: var(--text-dim); display: flex; justify-content: space-between;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 顶部工具栏 -->
+    <div class="toolbar">
+        <div class="tb-row">
+            <span class="tb-label">游戏路径：</span>
+            <select id="gamePathSelect" style="min-width: 300px; flex: 1;"></select>
+            <button id="addPathBtn">＋ 添加</button>
+            <button id="refreshBtn">↺ 刷新</button>
+            <button id="launchGameBtn" class="primary">▶ 启动游戏</button>
+            <div class="sep"></div>
+            <!--button id="importFileBtn" class="primary">📥 选择文件导入</button>
+            <input type="file" id="importFileInput" accept=".bin,.zip" multiple style="display:none;"-->
+            <label class="tb-label"><input type="checkbox" id="customPosCheck"> 自定义导入位置</label>
+            <select id="posRelative">
+                <option value="before">插入到选中行之前</option>
+                <option value="after">插入到选中行之后</option>
+            </select>
+        </div>
+        <div class="drop-zone" id="dropZone" style="cursor:pointer;" title="点击选择文件，或拖拽到此处">
+            将 <b>.bin</b> / <b>.eso</b> / <b>.zip</b> 文件拖拽到此处（点击此处也可选择文件）。<br>
+            <span style="font-size:11px;">直接导入到 <b>Bonus 末尾</b>（若勾选自定义位置则需随后点击表格行）。<br>
+            选择 BIN 时会自动读取同目录下的 CRC ESO 文件。</span>
+        </div>
+        <!-- ★ 修改 accept 加上 .eso -->
+        <input type="file" id="importFileInput" accept=".bin,.eso,.zip" multiple style="display:none;">
+    </div>
+
+    <!-- 表格区 -->
+    <div class="table-container">
+        <div class="table-inner">
+            <table>
+                <thead>
+                    <tr>
+                        <th width="50">启用</th>
+                        <th width="40">#</th>
+                        <th>文件名</th>
+                        <th>关卡名</th>
+                        <th>ID</th>
+                        <th>Leaderboard</th>
+                        <th>音效 (SFX)</th>
+                        <th width="220">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr><td colspan="8" style="text-align:center; color:#888;">请先选择游戏路径</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 底部状态栏 -->
+    <div class="status-bar">
+        <span id="statusText">就绪</span>
+        <span id="pendingText" style="color:var(--danger); font-weight:bold;"></span>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        const path = require('path');
+        const fs = require('fs');
+
+        let gamePaths = JSON.parse(localStorage.getItem('edge_game_paths') || '[]');
+        let currentExePath = localStorage.getItem('edge_active_game') || '';
+        let currentGameDir = currentExePath ? path.dirname(currentExePath) : '';
+        
+        let mappingData = null;
+        let levelCache = {}; // 格式: { filename: { levelId, name } }
+        let pendingImport = null; // 待导入的文件数据
+        let activeRow = null;     // 当前选中的行 { segment, index }
+
+        // ==================== CRC32 与 ESO 命名生成 ====================
+        // ★ 全局只创建一次 CRC 表
+        const CRC32_TABLE = (() => {
+            const table = new Uint32Array(256);
+            const poly = 0xEDB88320;
+            for (let i = 0; i < 256; i++) {
+                let crc = i;
+                for (let j = 0; j < 8; j++) crc = (crc & 1) ? ((crc >>> 1) ^ poly) : (crc >>> 1);
+                table[i] = crc;
+            }
+            return table;
+        })();
+
+        // 计算 ESO 的 CRC 名称（内部强制剔除扩展名）
+        function generateEsoName(filename) {
+            let pureName = filename.replace(/\.(bin|eso)$/i, '');
+            const encoder = new TextEncoder();
+            const bytes = encoder.encode(pureName);
+            const reversed = new Uint8Array(bytes.length);
+            for (let i = 0; i < bytes.length; i++) reversed[i] = bytes[bytes.length - 1 - i];
+            
+            let crc = 0;
+            for (let b of reversed) crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ b) & 0xFF];
+            crc = crc >>> 0;
+            return crc.toString(16).toUpperCase().padStart(8, '0') + '050DB82A';
+        }
+
+        // ================= 初始化与路径管理 =================
+        function initPaths() {
+            const sel = document.getElementById('gamePathSelect');
+            sel.innerHTML = '';
+            if (gamePaths.length === 0) {
+                sel.innerHTML = '<option value="">— 未选择游戏 —</option>';
+                document.getElementById('statusText').textContent = '请点击“添加”选择游戏 EXE 文件';
+                return;
+            }
+            gamePaths.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p;
+                opt.textContent = p;
+                if (p === currentExePath) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            if (!currentExePath && gamePaths.length > 0) {
+                currentExePath = gamePaths[0];
+                currentGameDir = path.dirname(currentExePath);
+                localStorage.setItem('edge_active_game', currentExePath);
+            }
+        }
+
+        // 在 initPaths() 附近加上
+        document.getElementById('pendingText').style.cursor = 'pointer';
+        document.getElementById('pendingText').title = '点击取消当前导入';
+        document.getElementById('pendingText').onclick = () => {
+            if (pendingImport) {
+                pendingImport = null;
+                document.getElementById('pendingText').textContent = '';
+                document.getElementById('statusText').textContent = '已取消暂存导入';
+            }
+        };
+
+        document.getElementById('gamePathSelect').onchange = function() {
+            currentExePath = this.value;
+            currentGameDir = currentExePath ? path.dirname(currentExePath) : '';
+            localStorage.setItem('edge_active_game', currentExePath);
+            refreshList();
+        };
+
+        document.getElementById('addPathBtn').onclick = async () => {
+            const file = await ipcRenderer.invoke('select-file');
+            if (file && file.toLowerCase().endsWith('.exe') && !gamePaths.includes(file)) {
+                gamePaths.push(file);
+                localStorage.setItem('edge_game_paths', JSON.stringify(gamePaths));
+                currentExePath = file;
+                currentGameDir = path.dirname(file);
+                localStorage.setItem('edge_active_game', currentExePath);
+                initPaths();
+                refreshList();
+            } else if (file) {
+                alert('请选择有效的游戏 EXE 文件');
+            }
+        };
+
+        document.getElementById('launchGameBtn').onclick = () => {
+            if (!currentExePath) return alert('请先选择游戏');
+            // 改为与主页一致的 IPC 发送方式，避免 spawn 路径/工作目录报错
+            ipcRenderer.send('launch-game', currentExePath);
+        };
+
+        // ================= XML 解析与生成 =================
+        function parseMapping(xmlText) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(xmlText, 'text/xml');
+            const root = doc.documentElement;
+            const result = { 
+                standard: { locked: 0, levels: [] }, 
+                bonus: { locked: 0, levels: [] }, 
+                extended: { locked: 0, levels: [] } 
+            };
+            
+            for (const segment of ['standard', 'bonus', 'extended']) {
+                let segNode = doc.querySelector(segment);
+                if (!segNode) continue;
+                
+                result[segment].locked = parseInt(segNode.getAttribute('special_locked_level_count') || '0', 10);
+                
+                let child = segNode.firstChild;
+                while (child) {
+                    if (child.nodeType === 1 && child.tagName.toLowerCase() === 'level') {
+                        result[segment].levels.push({ enabled: true, attrs: extractAttrs(child) });
+                    } else if (child.nodeType === 8) {
+                        // 解析注释中的 level
+                        const val = child.nodeValue.trim();
+                        if (val.startsWith('<level')) {
+                            try {
+                                const tempDoc = parser.parseFromString(val, 'text/xml');
+                                if (tempDoc.documentElement.tagName === 'level') {
+                                    result[segment].levels.push({ enabled: false, attrs: extractAttrs(tempDoc.documentElement) });
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                    child = child.nextSibling;
+                }
+            }
+            return result;
+        }
+
+        function extractAttrs(el) {
+            const attrs = {};
+            for (let i = 0; i < el.attributes.length; i++) {
+                attrs[el.attributes[i].name] = el.attributes[i].value;
+            }
+            return attrs;
+        }
+
+        function generateMappingXml(data) {
+            let xml = '<?xml version="1.0" encoding="iso-8859-1"?>\n<levels>\n';
+            for (const segment of ['standard', 'bonus', 'extended']) {
+                xml += `  <${segment} special_locked_level_count="${data[segment].locked}">\n`;
+                for (const lvl of data[segment].levels) {
+                    const attrStr = Object.entries(lvl.attrs).map(([k,v]) => `${k}="${v}"`).join(' ');
+                    if (lvl.enabled) {
+                        xml += `    <level ${attrStr}/>\n`;
+                    } else {
+                        xml += `    <!--<level ${attrStr}/>-->\n`;
+                    }
+                }
+                xml += `  </${segment}>\n`;
+            }
+            xml += '</levels>';
+            return xml;
+        }
+
+        // ================= 列表读取与渲染 =================
+        async function refreshList() {
+            if (!currentGameDir) return;
+            document.getElementById('statusText').textContent = '正在读取 mapping.xml...';
+            
+            const res = await ipcRenderer.invoke('read-mapping', currentGameDir);
+            if (!res.success) {
+                document.getElementById('tableBody').innerHTML = `<tr><td colspan="8" style="color:var(--danger);">读取失败: ${res.msg}</td></tr>`;
+                return;
+            }
+            
+            mappingData = parseMapping(res.content);
+            
+            // 从缓存读取关卡名
+            const cacheKey = `edge_level_cache_${currentGameDir}`;
+            levelCache = JSON.parse(localStorage.getItem(cacheKey) || '{}');
+            
+            renderTable();
+            document.getElementById('statusText').textContent = '加载完成';
+        }
+
+        async function renderTable() {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            let missingCache = [];
+
+            for (const segment of ['standard', 'bonus', 'extended']) {
+                const segData = mappingData[segment];
+                if (!segData) continue;
+
+                // 分组头
+                const headTr = document.createElement('tr');
+                headTr.className = 'group-header';
+                headTr.innerHTML = `
+                    <td colspan="8">
+                        <strong>${segment.toUpperCase()}</strong> — 特殊锁定关卡数：
+                        <input type="number" value="${segData.locked}" onchange="updateLocked('${segment}', this.value)" style="width:50px;">
+                    </td>
+                `;
+                tbody.appendChild(headTr);
+
+                // 遍历关卡
+                segData.levels.forEach((lvl, index) => {
+                    const tr = document.createElement('tr');
+                    tr.dataset.segment = segment;
+                    tr.dataset.index = index;
+                    tr.onclick = (e) => handleRowClick(e, tr, segment, index);
+
+                    const attrs = lvl.attrs;
+                    const filename = attrs.filename || '';
+                    
+                    // 缓存处理
+                    let meta = levelCache[filename] || { name: '...', levelId: '...' };
+                    if (!levelCache[filename]) {
+                        missingCache.push({ filename, tr });
+                    }
+
+                    tr.innerHTML = `
+                        <td align="center"><input type="checkbox" ${lvl.enabled ? 'checked' : ''} onchange="toggleEnable('${segment}', ${index}, this.checked)"></td>
+                        <td>${index + 1}</td>
+                        <td>${filename}</td>
+                        <td class="cell-name">${meta.name}</td>
+                        <td class="cell-id">${meta.levelId}</td>
+                        <td>${attrs.leaderboard_id || ''}</td>
+                        <td>${attrs.name_sfx || ''}</td>
+                        <td>
+                            <div class="cell-actions">
+                                <button class="btn-sm" onclick="event.stopPropagation(); moveRow('${segment}', ${index}, -1)">↑</button>
+                                <button class="btn-sm" onclick="event.stopPropagation(); moveRow('${segment}', ${index}, 1)">↓</button>
+                                <button class="btn-sm" onclick="event.stopPropagation(); decompileLevel('${encodeURIComponent(filename)}')">反编译</button>
+                                <button class="btn-sm btn-danger" onclick="event.stopPropagation(); deleteLevel('${segment}', ${index}, '${encodeURIComponent(filename)}')">删除</button>
+                            </div>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+
+            // 异步读取缺失的 BIN 元数据
+            if (missingCache.length > 0) {
+                for (const item of missingCache) {
+                    const binPath = path.join(currentGameDir, 'levels', item.filename + '.bin');
+                    const meta = await ipcRenderer.invoke('read-bin-metadata', binPath);
+                    if (meta) {
+                        levelCache[item.filename] = meta;
+                        item.tr.querySelector('.cell-name').textContent = meta.name;
+                        item.tr.querySelector('.cell-id').textContent = meta.levelId;
+                    } else {
+                        item.tr.querySelector('.cell-name').textContent = '未找到BIN';
+                        item.tr.querySelector('.cell-id').textContent = '-';
+                    }
+                }
+                localStorage.setItem(`edge_level_cache_${currentGameDir}`, JSON.stringify(levelCache));
+            }
+        }
+
+        // ================= 行操作 =================
+        window.updateLocked = function(segment, val) {
+            mappingData[segment].locked = parseInt(val) || 0;
+            saveMapping();
+        };
+
+        window.toggleEnable = function(segment, index, checked) {
+            mappingData[segment].levels[index].enabled = checked;
+            saveMapping();
+            // 不重新渲染以避免复选框闪烁
+        };
+
+        window.moveRow = function(segment, index, delta) {
+            const arr = mappingData[segment].levels;
+            const newIndex = index + delta;
+            if (newIndex < 0 || newIndex >= arr.length) return;
+            const temp = arr[index];
+            arr[index] = arr[newIndex];
+            arr[newIndex] = temp;
+            saveMapping();
+            renderTable();
+        };
+
+        window.decompileLevel = async function(encodedFilename) {
+            const filename = decodeURIComponent(encodedFilename); // ★ 加上这行
+            const res = await ipcRenderer.invoke('read-bin-file', currentGameDir, filename);
+            if (!res.success) return alert(res.msg);
+            ipcRenderer.send('trigger-decompile-in-editor', res.buffer, filename);
+            alert('已发送至主编辑器进行反编译');
+        };
+
+        window.deleteLevel = async function(segment, index, encodedFilename) {
+            const filename = decodeURIComponent(encodedFilename); // ★ 加上这行
+            if (!confirm(`确定要彻底删除关卡 ${filename} 吗？\n这将会删除对应的物理文件(层级、模型)。`)) return;
+            
+            await ipcRenderer.invoke('delete-level-files', currentGameDir, filename);
+            
+            mappingData[segment].levels.splice(index, 1);
+            saveMapping();
+            renderTable();
+        };
+
+        async function saveMapping() {
+            const xmlStr = generateMappingXml(mappingData);
+            await ipcRenderer.invoke('save-mapping', currentGameDir, xmlStr);
+            document.getElementById('statusText').textContent = '已自动保存至 mapping.xml';
+        }
+
+        // ================= 导入逻辑 =================
+        // 拖拽
+        const dropZone = document.getElementById('dropZone');
+        dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); };
+        dropZone.ondragleave = () => { dropZone.classList.remove('drag-over'); };
+        dropZone.ondrop = async (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            if (!currentGameDir) return alert('请先选择游戏');
+            await handleFiles(Array.from(e.dataTransfer.files));
+        };
+
+        // 点击选择文件
+        //document.getElementById('importFileBtn').onclick = () => document.getElementById('importFileInput').click();
+        // ★ 让拖拽框支持点击选择
+        document.getElementById('dropZone').onclick = () => document.getElementById('importFileInput').click();
+        document.getElementById('importFileInput').onchange = async (e) => {
+            if (e.target.files.length > 0) {
+                await handleFiles(Array.from(e.target.files));
+                e.target.value = ''; // 清空
+            }
+        };
+
+        // 处理文件数组
+        async function handleFiles(files) {
+            const importQueue = []; // 统一收集所有待导入的数据
+            const zips = [];
+            const bins = [];
+            const esos = [];
+
+            for (const file of files) {
+                if (file.name.toLowerCase().endsWith('.zip')) zips.push(file);
+                else if (file.name.toLowerCase().endsWith('.bin')) bins.push(file);
+                else if (file.name.toLowerCase().endsWith('.eso')) esos.push(file);
+            }
+
+            // 1. 处理散装的 BIN 和 ESO
+            for (const binFile of bins) {
+                const baseName = binFile.name.replace(/\.bin$/i, '');
+                const binData = new Uint8Array(await binFile.arrayBuffer());
+                const expectedEsoName = generateEsoName(baseName);
+                let esoData = null;
+
+                // 先找拖入列表
+                let targetEso = esos.find(e => e.name.replace(/\.eso$/i, '').toUpperCase() === expectedEsoName);
+                if (targetEso) {
+                    esoData = new Uint8Array(await targetEso.arrayBuffer());
+                } else {
+                    // 尝试找物理同目录
+                    let realPath = binFile.path;
+                    try {
+                        const electron = require('electron');
+                        if (electron.webUtils && typeof electron.webUtils.getPathForFile === 'function') {
+                            realPath = electron.webUtils.getPathForFile(binFile);
+                        }
+                    } catch (e) {}
+
+                    if (realPath) {
+                        const esoPath = path.join(path.dirname(realPath), expectedEsoName + '.eso');
+                        if (fs.existsSync(esoPath)) {
+                            esoData = new Uint8Array(fs.readFileSync(esoPath));
+                        }
+                    }
+                }
+                // 兜底
+                if (!esoData && bins.length === 1 && esos.length === 1) {
+                    esoData = new Uint8Array(await esos[0].arrayBuffer());
+                }
+                importQueue.push({ filename: baseName, binData, esoData });
+            }
+
+            // 2. 处理 ZIP（支持包内多个）
+            for (const file of zips) {
+                try {
+                    const zip = await JSZip.loadAsync(file);
+                    const zipBins = [];
+                    const zipEsos = [];
+
+                    for (const [name, entry] of Object.entries(zip.files)) {
+                        if (entry.dir) continue;
+                        const shortName = name.split('/').pop();
+                        if (name.toLowerCase().endsWith('.bin')) zipBins.push({ entry, name: shortName });
+                        else if (name.toLowerCase().endsWith('.eso')) zipEsos.push({ entry, name: shortName });
+                    }
+
+                    for (const b of zipBins) {
+                        const baseName = b.name.replace(/\.bin$/i, '');
+                        const binData = await b.entry.async('uint8array');
+                        const expectedEsoName = generateEsoName(baseName);
+                        let esoData = null;
+
+                        // 在包内寻找对应 ESO
+                        const matchedEso = zipEsos.find(e => e.name.replace(/\.eso$/i, '').toUpperCase() === expectedEsoName);
+                        if (matchedEso) {
+                            esoData = await matchedEso.entry.async('uint8array');
+                        }
+                        // 包内兜底
+                        if (!esoData && zipBins.length === 1 && zipEsos.length === 1) {
+                            esoData = await zipEsos[0].entry.async('uint8array');
+                        }
+                        
+                        importQueue.push({ filename: baseName, binData, esoData });
+                    }
+                } catch (err) { alert(`解压 ${file.name} 失败`); }
+            }
+
+            if (importQueue.length === 0) return alert('未找到有效的 BIN 文件');
+
+            // 3. 判断走单人流程还是批量流程
+            if (importQueue.length === 1) {
+                // 走单体逻辑（带自定义位置）
+                const item = importQueue[0];
+                pendingImport = { filename: item.filename, binData: item.binData, esoData: item.esoData, meta: extractMetaFromBuf(item.binData) };
+                await queueImport(item.filename, item.binData, item.esoData);
+            } else {
+                // 走批量逻辑（不管勾没勾自定义位置，都直接批量追加到 Bonus 末尾）
+                await handleBatchImport(importQueue);
+            }
+        }
+
+        // 提取 BIN 元数据（前端辅助函数）
+        function extractMetaFromBuf(buf) {
+            if (buf.length < 8) return { name: '未知', levelId: 0 };
+            const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+            const levelId = view.getInt32(0, true);
+            const nameLen = view.getInt32(4, true);
+            if (nameLen > 0 && buf.length >= 8 + nameLen) {
+                const name = new TextDecoder().decode(buf.slice(8, 8 + nameLen));
+                return { levelId, name };
+            }
+            return { levelId, name: '未知' };
+        }
+
+        // 单文件导入（带重名检测和自定义位置）
+        async function queueImport(filename, binData, esoData) {
+            // ★ 新增：先检查 mapping 中是否已存在同名关卡
+            let isDuplicate = false;
+            for (const seg of ['standard', 'bonus', 'extended']) {
+                if (mappingData[seg].levels.some(l => l.attrs.filename === filename)) {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+
+            if (isDuplicate) {
+                const confirmOverwrite = confirm(`检测到关卡 "${filename}" 已存在于游戏列表中。\n\n是否直接覆盖更新其 bin 和 eso 文件？\n(点击“确定”将覆盖文件并保留原有排序；点击“取消”放弃导入)`);
+                if (confirmOverwrite) {
+                    await doOverwrite(filename);
+                } else {
+                    pendingImport = null;
+                    document.getElementById('pendingText').textContent = '';
+                    document.getElementById('statusText').textContent = '已取消导入';
+                }
+                return;
+            }
+
+            const customPos = document.getElementById('customPosCheck').checked;
+            if (!customPos) {
+                await performImport('bonus', mappingData.bonus.levels.length);
+            } else {
+                document.getElementById('pendingText').textContent = `⚠️ 已暂存 ${filename}，请点击表格中的一行以确定插入位置！`;
+                alert(`已暂存：${filename}\n请点击表格中的一行确定插入位置。`);
+            }
+        }
+
+        // 批量导入（统一确认，静默追加/覆盖，不打断用户）
+        async function handleBatchImport(queue) {
+            const msg = `检测到待导入 ${queue.length} 个关卡。\n\n批量导入将默认追加到 Bonus 末尾。如果遇到已存在的关卡名，将自动覆盖其文件且不改变原有排序。\n\n是否继续？`;
+            if (!confirm(msg)) return;
+
+            let addedCount = 0;
+            let updatedCount = 0;
+
+            document.getElementById('statusText').textContent = `正在批量导入 ${queue.length} 个关卡...`;
+
+            for (let i = 0; i < queue.length; i++) {
+                const item = queue[i];
+                const meta = extractMetaFromBuf(item.binData);
+                
+                // 检查重名
+                let isDuplicate = false;
+                for (const seg of ['standard', 'bonus', 'extended']) {
+                    if (mappingData[seg].levels.some(l => l.attrs.filename === item.filename)) {
+                        isDuplicate = true;
+                        break;
+                    }
+                }
+
+                // 写入硬盘
+                await ipcRenderer.invoke('install-level-to-game', currentGameDir, item.filename, item.binData, item.esoData || new Uint8Array(0));
+                
+                // 缓存
+                levelCache[item.filename] = meta;
+
+                if (isDuplicate) {
+                    updatedCount++;
+                } else {
+                    // 追加到 Bonus
+                    mappingData.bonus.levels.push({
+                        enabled: true,
+                        attrs: {
+                            filename: item.filename,
+                            leaderboard_id: meta.levelId.toString(),
+                            name_sfx: meta.name
+                        }
+                    });
+                    addedCount++;
+                }
+                
+                document.getElementById('statusText').textContent = `导入中 (${i+1}/${queue.length}): ${item.filename}`;
+            }
+
+            localStorage.setItem(`edge_level_cache_${currentGameDir}`, JSON.stringify(levelCache));
+            await saveMapping();
+            renderTable();
+            
+            document.getElementById('statusText').textContent = '就绪';
+            alert(`批量导入完成！\n新增关卡: ${addedCount} 个\n覆盖更新: ${updatedCount} 个`);
+        }
+
+        // 执行覆盖（不修改 mapping 结构）
+        async function doOverwrite(filename) {
+            const { binData, esoData, meta } = pendingImport;
+            document.getElementById('statusText').textContent = `正在覆盖更新 ${filename}...`;
+            
+            const res = await ipcRenderer.invoke('install-level-to-game', currentGameDir, filename, binData, esoData || new Uint8Array(0));
+            if (!res.success) {
+                alert('覆盖失败: ' + res.msg);
+                pendingImport = null;
+                return;
+            }
+            
+            levelCache[filename] = meta;
+            localStorage.setItem(`edge_level_cache_${currentGameDir}`, JSON.stringify(levelCache));
+            
+            pendingImport = null;
+            document.getElementById('pendingText').textContent = '';
+            
+            renderTable(); 
+            document.getElementById('statusText').textContent = `已覆盖更新 ${filename}`;
+            alert(`关卡 "${filename}" 文件已覆盖更新！（未修改 mapping 结构）`);
+        }
+
+        // 接收主界面编译器推送
+        ipcRenderer.on('install-from-editor', async (e, filename, binData, esoData) => {
+            if (!currentGameDir) return alert('请先选择游戏目录');
+            
+            const finalBinData = new Uint8Array(binData);
+            const finalEsoData = esoData ? new Uint8Array(esoData) : null;
+            
+            // ★ 核心修复：必须先挂载到 pendingImport，否则如果遇到重名触发 doOverwrite 会崩溃
+            pendingImport = { 
+                filename: filename, 
+                binData: finalBinData, 
+                esoData: finalEsoData, 
+                meta: extractMetaFromBuf(finalBinData) 
+            };
+            
+            await queueImport(filename, finalBinData, finalEsoData);
+        });
+
+        // 点击表格行
+        function handleRowClick(e, tr, segment, index) {
+            // 处理高亮
+            document.querySelectorAll('tr').forEach(r => r.classList.remove('active'));
+            tr.classList.add('active');
+            activeRow = { segment, index };
+
+            if (pendingImport) {
+                const relative = document.getElementById('posRelative').value;
+                const insertIdx = relative === 'before' ? index : index + 1;
+                performImport(segment, insertIdx);
+            }
+        }
+
+        // 执行插入并安装文件
+        async function performImport(segment, insertIndex) {
+            if (!pendingImport) return;
+            const { filename, binData, esoData, meta } = pendingImport;
+
+            document.getElementById('statusText').textContent = `正在安装 ${filename}...`;
+            
+            // ★ 核心修改：直接传二进制数据
+            const res = await ipcRenderer.invoke('install-level-to-game', currentGameDir, filename, binData, esoData || new Uint8Array(0));
+            if (!res.success) return alert('安装失败: ' + res.msg);
+
+            // 写入缓存
+            levelCache[filename] = meta;
+            localStorage.setItem(`edge_level_cache_${currentGameDir}`, JSON.stringify(levelCache));
+
+            // 更新 mapping 树
+            const newLvl = {
+                enabled: true,
+                attrs: {
+                    filename: filename,
+                    leaderboard_id: meta.levelId.toString(),
+                    name_sfx: meta.name
+                }
+            };
+            
+            mappingData[segment].levels.splice(insertIndex, 0, newLvl);
+            await saveMapping();
+
+            pendingImport = null;
+            document.getElementById('pendingText').textContent = '';
+            renderTable();
+            // ★ 提示是否包含了 ESO
+            if (esoData && esoData.length > 0) {
+                alert(`关卡 ${filename} 及模型已安装成功！`);
+            } else {
+                alert(`关卡 ${filename} 安装成功！（注意：未找到对应的 ESO 模型）`);
+            }
+        }
+
+        // 启动
+        initPaths();
+        if (currentGameDir) refreshList();
+    </script>
+</body>
+</html>

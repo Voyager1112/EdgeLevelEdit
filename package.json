@@ -1,0 +1,49 @@
+{
+  "name": "edge-level-editor",
+  "version": "1.6.8",
+  "description": "EDGE Level Editor",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "build": {
+    "appId": "com.yourname.edgeeditor",
+    "productName": "Edge Level Editor",
+    "directories": {
+      "output": "dist"
+    },
+    "asar": true,
+    "compression": "maximum",
+    "files": [
+      "main.js",
+      "index.html",
+      "js/**/*",
+      "misc/**/*",
+      "!misc/KeyEvent_recorder.exe"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "misc/icon.ico"
+    },
+    "extraResources": [
+      {
+        "from": "./misc/KeyEvent_recorder.exe",
+        "to": "./KeyEvent_recorder.exe"
+      }
+    ]
+  },
+  "keywords": [],
+  "author": "Voyager1112",
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  }
+}

@@ -1,0 +1,1672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script>
+    try { if (localStorage.getItem('edgeEditorDarkMode') === '1') document.documentElement.classList.add('dark'); } catch(e){}
+    </script>
+    <script src="./misc/electron-storage.js"></script>
+    <script src="./js/online/three.min.js"></script>
+    <script src="./js/online/OrbitControls.js"></script>
+    <script src="./js/online/jszip.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Edge 关卡xml编辑器3D 1.6.8</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="./misc/favicon.png">
+    <link rel="apple-touch-icon" href="./misc/favicon.png">
+    <style>
+/* ===================================================================
+   Edge Level Editor — Windows 原生风格 · 直角 · 浅色 / 深色双主题
+   =================================================================== */
+
+:root{
+    --bg:              #ffffff;
+    --bg-toolbar:      #f3f3f3;
+    --bg-panel:        #f7f7f7;
+    --bg-canvas:       #f0f0f0;
+    --bg-input:        #ffffff;
+    --bg-button:       #fdfdfd;
+    --bg-menu:         #ffffff;
+    --bg-card:         #fafafa;
+    --bg-log:          #fbfbfb;
+    --bg-pixel:        #ffffff;
+    --bg-grid:         #c9c9c9;
+    --bg-waypoint:     #fff6e0;
+    --bg-hover:        #eaf3fb;
+    --bg-active:       #d6e8f8;
+    --bg-three-ctrl:   rgba(255,255,255,.95);
+    --border:          #dcdcdc;
+    --border-strong:   #bcbcbc;
+    --border-soft:     #f0f0f0;
+    --text:            #1b1b1b;
+    --text-dim:        #616161;
+    --text-faint:      #8a8a8a;
+    --accent:          #0067c0;
+    --accent-hover:    #0a76cf;
+    --accent-soft:     #e5f1fb;
+    --on-accent:       #ffffff;
+    --danger:          #c42b1c;
+    --shadow-menu:     0 6px 20px rgba(0,0,0,.18);
+    --shadow-modal:    0 12px 40px rgba(0,0,0,.28);
+    --scroll-track:    #f2f2f2;
+    --scroll-thumb:    #c2c2c2;
+    --scroll-thumb-h:  #a6a6a6;
+}
+
+html.dark{
+    --bg:              #1e1e1e;
+    --bg-toolbar:      #2d2d2d;
+    --bg-panel:        #252526;
+    --bg-canvas:       #1b1b1b;
+    --bg-input:        #2a2a2a;
+    --bg-button:       #333333;
+    --bg-menu:         #2d2d2d;
+    --bg-card:         #2a2a2a;
+    --bg-log:          #1a1a1a;
+    --bg-pixel:        #2a2a2a;
+    --bg-grid:         #444444;
+    --bg-waypoint:     #3a2e1a;
+    --bg-hover:        #2a3a4a;
+    --bg-active:       #1a4a6a;
+    --bg-three-ctrl:   rgba(45,45,45,.95);
+    --border:          #3c3c3c;
+    --border-strong:   #4a4a4a;
+    --border-soft:     #333333;
+    --text:            #e0e0e0;
+    --text-dim:        #a0a0a0;
+    --text-faint:      #707070;
+    --accent:          #4fc3f7;
+    --accent-hover:    #6dd0ff;
+    --accent-soft:     #1a3a5a;
+    --on-accent:       #0a0a0a;
+    --danger:          #e05a4a;
+    --shadow-menu:     0 6px 20px rgba(0,0,0,.55);
+    --shadow-modal:    0 12px 40px rgba(0,0,0,.65);
+    --scroll-track:    #252525;
+    --scroll-thumb:    #4a4a4a;
+    --scroll-thumb-h:  #5c5c5c;
+}
+
+*{ margin:0; padding:0; box-sizing:border-box; }
+html,body{ height:100%; }
+
+body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", "微软雅黑", system-ui, sans-serif;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+    transition: background .2s, color .2s;
+}
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar{ width:12px; height:12px; }
+::-webkit-scrollbar-track{ background: var(--scroll-track); }
+::-webkit-scrollbar-thumb{ background: var(--scroll-thumb); border:3px solid var(--scroll-track); }
+::-webkit-scrollbar-thumb:hover{ background: var(--scroll-thumb-h); }
+
+/* ---------- 通用控件 ---------- */
+input[type="text"],
+input[type="number"],
+input[type="search"],
+select,
+textarea{
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--bg-input);
+    border: 1px solid var(--border-strong);
+    padding: 2px 5px;
+    height: 22px;
+    outline: none;
+    border-radius: 0;
+}
+textarea{ height: auto; }
+input[type="text"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus{
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+/*input[type="checkbox"]{
+    width: 13px; height: 13px;
+    accent-color: var(--accent);
+    margin: 0;
+    flex-shrink: 0;
+    vertical-align: -2px;
+}*/
+input[type="checkbox"]{
+    width: 13px !important; 
+    height: 13px !important;
+    flex: 0 0 auto !important;
+    accent-color: var(--accent);
+    margin: 0;
+    vertical-align: -2px;
+    cursor: pointer;
+}
+input[type="range"]{ accent-color: var(--accent); }
+input[type="color"]{
+    width: 36px; height: 22px;
+    padding: 1px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-input);
+    cursor: pointer;
+    border-radius: 0;
+}
+button{
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--bg-button);
+    border: 1px solid var(--border-strong);
+    padding: 3px 10px;
+    height: 24px;
+    line-height: 16px;
+    cursor: pointer;
+    border-radius: 0;
+    white-space: nowrap;
+    transition: background .12s, border-color .12s, color .12s;
+}
+button:hover{ background: var(--bg-hover); border-color: #8fb8da; }
+button:active{ background: var(--bg-active); }
+button:disabled{ color: var(--text-faint); background: var(--bg-button); cursor:default; border-color: var(--border); }
+button.primary{
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+}
+button.primary:hover{ background: var(--accent-hover); border-color: var(--accent-hover); }
+button.btn-danger{
+    color: var(--danger);
+    border-color: #d9a49f;
+    background: var(--bg-button);
+}
+button.btn-danger:hover{ background: var(--danger); border-color: var(--danger); color:#fff; }
+button.btn-sm{ padding: 1px 8px; height: 20px; font-size: 11px; }
+
+/* ===================================================================
+   工具栏
+   =================================================================== */
+.toolbar{
+    background: var(--bg-toolbar);
+    border-bottom: 1px solid var(--border-strong);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 4px 6px;
+    flex-shrink: 0;
+    z-index: 10;
+    transition: background .2s;
+}
+.tb-row{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-height: 24px;
+}
+.tb-row.center-row{ justify-content: center; }
+.tb-row .spacer{ flex: 1 1 auto; }
+.tb-group{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+.tb-label{
+    color: var(--text-dim);
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+.sep{
+    width: 1px;
+    height: 18px;
+    background: var(--border-strong);
+    margin: 0 3px;
+    flex-shrink: 0;
+}
+.toolbar button,
+.toolbar a{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    padding: 0 10px;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--bg-button);
+    border: 1px solid var(--border-strong);
+    text-decoration: none;
+    border-radius: 0;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .12s, border-color .12s, color .12s;
+}
+.toolbar a{ color: var(--text); }
+.toolbar button:hover,
+.toolbar a:hover{ background: var(--bg-hover); border-color: #8fb8da; }
+.toolbar button:active,
+.toolbar a:active{ background: var(--bg-active); }
+.toolbar button.active,
+.toolbar a.active{
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+}
+.toolbar button.sq{ width:24px; padding:0; font-size:14px; }
+.toolbar button.primary{
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+}
+.toolbar button.primary:hover{ background: var(--accent-hover); border-color: var(--accent-hover); }
+
+.toolbar label{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-dim);
+    font-size: 12px;
+    white-space: nowrap;
+}
+.toolbar input[type="text"],
+.toolbar input[type="number"],
+.toolbar select{
+    height: 22px;
+    font-size: 12px;
+    padding: 1px 5px;
+}
+
+/* ---------- 下拉菜单 ---------- */
+.dropdown{
+    position: relative;
+    display: inline-block;
+}
+.dropdown-menu{
+    display: none;
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    min-width: 170px;
+    background: var(--bg-menu);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-menu);
+    z-index: 200;
+    padding: 2px;
+}
+.dropdown.open .dropdown-menu{ display: block; }
+.toolbar .dropdown-menu button,
+.toolbar .dropdown-menu a{
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    height: auto;
+    min-height: 26px;
+    padding: 4px 12px;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 12px;
+    text-align: left;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.toolbar .dropdown-menu button:hover,
+.toolbar .dropdown-menu a:hover{ background: var(--bg-hover); }
+
+/* ---------- Level 属性条 ---------- */
+.level-props{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    max-height: 400px;
+    overflow: hidden;
+    transition: max-height .25s ease, opacity .2s ease,
+                padding .25s ease, border-width .25s ease;
+}
+.level-props.collapsed{
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
+    pointer-events: none;
+}
+.level-props label{ font-size: 11px; }
+.level-props input{ font-size: 11px; }
+
+/* 统一运动容器 */
+#unifiedMovementContainer{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    height: 24px;
+}
+#unifiedBaseSelect{ height: 20px; font-size: 11px; min-width: 130px; }
+.chk{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+/* ===================================================================
+   主区域
+   =================================================================== */
+.main-area{
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+/* ---------- 2D 画布 ---------- */
+.canvas-wrapper{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+    position: relative;
+    background: var(--bg-canvas);
+}
+.zoom-bar{
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 5px 16px;
+    min-height: 34px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-dim);
+}
+.zoom-bar input[type="range"]{ width: 150px; }
+.zoom-bar input[type="number"]{
+    width: 62px;
+    text-align: center;
+    height: 22px;
+}
+.zoom-bar .zoom-layer-group{
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 12px;
+    padding-right: 12px;
+    border-right: 1px solid var(--border);
+}
+.canvas-wrap{
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+    overflow: auto;
+    padding: 20px;
+    background: var(--bg-canvas);
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-start;
+    position: relative;
+}
+.canvas-wrap .grid-info{
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+    background: var(--bg-menu);
+    border: 1px solid var(--border);
+    padding: 1px 8px;
+    pointer-events: none;
+    z-index: 5;
+}
+#gridWrapper{
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-start;
+    flex-shrink: 0;
+    position: relative;
+    overflow: visible;
+    width: auto;
+    height: auto;
+}
+#pixelGrid{
+    display: grid;
+    gap: 1px;
+    background: var(--bg-grid);
+    border: 1px solid var(--border-strong);
+    padding: 1px;
+    transform-origin: center center;
+    transition: transform .1s;
+    position: relative;
+    z-index: 1;
+}
+#radiusOverlay{
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* ---------- 网格单元 ---------- */
+.pixel{
+    width: 28px;
+    height: 28px;
+    background: var(--bg-pixel);
+    cursor: pointer;
+    position: relative;
+    box-sizing: border-box;
+    transition: box-shadow .08s;
+}
+.pixel:hover{
+    box-shadow: inset 0 0 0 2px rgba(0,103,192,.55);
+    z-index: 2;
+}
+.pixel .coord-label{
+    position: absolute;
+    bottom: 1px;
+    right: 2px;
+    font-size: 7px;
+    font-family: Consolas, monospace;
+    color: rgba(0,0,0,.28);
+    pointer-events: none;
+}
+html.dark .pixel .coord-label{ color: rgba(255,255,255,.32); }
+.pixel .elem-id{
+    position: absolute;
+    top: 1px;
+    left: 2px;
+    font-size: 8px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 0 3px #000, 0 1px 2px #000;
+    pointer-events: none;
+}
+.pixel .waypoint-label{
+    position: absolute;
+    bottom: 1px;
+    left: 2px;
+    font-size: 7px;
+    font-weight: 700;
+    color: #ffcc44;
+    text-shadow: 0 0 3px #000;
+    pointer-events: none;
+    z-index: 3;
+}
+.pixel .static-mode-label{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%,-50%);
+    font-size: 8px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 0 3px #000;
+    pointer-events: none;
+}
+.pixel .spawn-label,
+.pixel .exit-label{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%,-50%);
+    font-size: 9px;
+    font-weight: 700;
+    text-shadow: 0 0 3px #000, 0 1px 2px #000;
+    pointer-events: none;
+    z-index: 4;
+}
+.pixel .spawn-label{ color: #22ff99; }
+.pixel .exit-label{ color: #ff5c5c; }
+.pixel.static-block{ border: 1px solid rgba(0,0,0,.12); }
+html.dark .pixel.static-block{ border-color: rgba(255,255,255,.12); }
+.pixel.spawn{ outline: 2px dashed #00a35c; outline-offset: -2px; }
+.pixel.exit{ outline: 2px dashed #d33a2c; outline-offset: -2px; }
+.pixel.waypoint-dot{
+    outline: 1px dashed #d18b00;
+    outline-offset: -2px;
+    background: var(--bg-waypoint) !important;
+}
+.pixel.selected{
+    box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 2px rgba(0,103,192,.35);
+    z-index: 5;
+}
+.pixel .static-rgb-indicator{
+    position: absolute;
+    bottom: 1px;
+    right: 1px;
+    width: 6px;
+    height: 6px;
+    border: 1px solid rgba(0,0,0,.25);
+    pointer-events: none;
+}
+html.dark .pixel .static-rgb-indicator{ border-color: rgba(255,255,255,.25); }
+
+/* ===================================================================
+   右侧属性面板
+   =================================================================== */
+.panel{
+    width: 340px;
+    flex-shrink: 0;
+    height: 100%;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border-strong);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    overflow-y: auto;
+    font-size: 13px;
+}
+.panel h3{
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 3px;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+}
+.panel .panel-content-area{
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+}
+.panel .elem-list-area{
+    flex-shrink: 0;
+    max-height: 220px;
+    min-height: 70px;
+    overflow-y: auto;
+    border-top: 1px solid var(--border);
+    padding-top: 4px;
+    margin-top: 4px;
+}
+.panel .elem-list{
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    padding: 2px;
+    max-height: 190px;
+    overflow-y: auto;
+}
+.panel .empty-msg{
+    color: var(--text-faint);
+    font-size: 12px;
+    text-align: center;
+    padding: 26px 0;
+}
+.panel .prop-row{
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 3px;
+}
+.panel .prop-row > label{
+    color: var(--text-dim);
+    min-width: 70px;
+    font-size: 12px;
+}
+.panel .prop-row input,
+.panel .prop-row select{
+    flex: 1;
+    min-width: 40px;
+    height: 22px;
+    font-size: 12px;
+    padding: 1px 5px;
+}
+.panel .prop-row input[type="number"]{ flex: 0 1 62px; }
+.panel .prop-row input[type="range"]{ flex: 1; min-width: 60px; height: auto; padding: 0; border: none; }
+.panel .prop-row input[type="color"]{ flex: 0 0 auto; width: 36px; }
+.panel .prop-row .remove-btn{
+    flex: 0 0 auto;
+    color: var(--danger);
+    border-color: #d9a49f;
+    background: var(--bg-button);
+    padding: 1px 10px;
+    height: 22px;
+    font-size: 12px;
+}
+.panel .prop-row .remove-btn:hover{ background: var(--danger); border-color: var(--danger); color:#fff; }
+.panel .prop-row .chk-title{
+    color: var(--text-dim);
+    min-width: 70px;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+.panel .prop-row .chk-group{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1;
+}
+.panel .prop-row .chk-group label,
+.panel .prop-row .chk-label{
+    min-width: auto;
+    flex: 0 0 auto;
+    color: var(--text-dim);
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+.panel .add-btn{
+    background: var(--bg-button);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 2px 12px;
+    height: 22px;
+    font-size: 12px;
+    margin-top: 4px;
+}
+.panel .add-btn:hover{ background: var(--bg-hover); border-color: #8fb8da; }
+.panel .waypoint-list{
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    padding: 3px;
+    max-height: 190px;
+    overflow-y: auto;
+    margin-top: 4px;
+}
+.panel .waypoint-item{
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 3px 4px;
+    border-bottom: 1px solid var(--border-soft);
+    font-size: 12px;
+}
+.panel .waypoint-item:last-child{ border-bottom: none; }
+.panel .waypoint-item input{
+    width: 46px;
+    height: 20px;
+    font-size: 11px;
+    padding: 1px 4px;
+}
+.panel .waypoint-item .wp-label{
+    color: #b07500;
+    font-weight: 600;
+    min-width: 30px;
+}
+html.dark .panel .waypoint-item .wp-label{ color: #e0b050; }
+.panel .waypoint-item .wp-field-label{
+    color: var(--text-faint);
+    font-size: 10px;
+}
+.panel .sub-elem-section{
+    border-top: 1px solid var(--border);
+    padding-top: 6px;
+    margin-top: 6px;
+}
+.panel .sub-title{
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 3px;
+}
+.panel .field-hint{
+    font-size: 10px;
+    color: var(--text-faint);
+    margin-left: 4px;
+}
+.panel .rgb-presets{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 4px 0;
+}
+.panel .rgb-presets button{
+    padding: 1px 8px;
+    height: 21px;
+    font-size: 11px;
+    background: var(--bg-button);
+    border: 1px solid var(--border-strong);
+}
+.panel .rgb-presets button:hover{ background: var(--bg-hover); }
+
+/* ---------- 元素列表 ---------- */
+.elem-item{
+    padding: 2px 6px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border-soft);
+}
+.elem-item:last-child{ border-bottom: none; }
+.elem-item:hover{ background: var(--bg-hover); }
+.elem-item.active{
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    padding-left: 4px;
+}
+.color-dot{
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border: 1px solid rgba(0,0,0,.25);
+    flex-shrink: 0;
+}
+
+/* ===================================================================
+   状态栏
+   =================================================================== */
+.status-bar{
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--bg-toolbar);
+    border-top: 1px solid var(--border-strong);
+    padding: 3px 14px;
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+}
+.status-bar .coord-display{
+    font-family: Consolas, monospace;
+    color: var(--accent);
+}
+
+/* ===================================================================
+   显示控制
+   =================================================================== */
+#visibilityArea{
+    flex-shrink: 0;
+    background: var(--bg-toolbar);
+    border-top: 1px solid var(--border);
+    padding: 4px 12px;
+    box-sizing: border-box;
+}
+#visibilityCheckboxes{
+    display: flex !important;
+    flex-wrap: wrap !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 4px 14px !important;
+    font-size: 12px !important;
+    width: 100% !important;
+    color: var(--text-dim);
+}
+#visibilityCheckboxes > label{
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    align-items: center !important;
+    gap: 4px !important;
+    color: var(--text-dim) !important;
+    font-size: 12px !important;
+    white-space: nowrap !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    cursor: pointer;
+}
+#visibilityCheckboxes > label > input[type="checkbox"]{
+    width: 13px !important;
+    height: 13px !important;
+    margin: 0 !important;
+    flex-shrink: 0 !important;
+}
+
+/* ===================================================================
+   提示条
+   =================================================================== */
+.toast{
+    position: fixed;
+    bottom: 96px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-menu);
+    color: var(--text);
+    padding: 6px 20px;
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-menu);
+    font-size: 13px;
+    z-index: 999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s;
+}
+.toast.show{ opacity: 1; }
+
+/* ===================================================================
+   选择对话框
+   =================================================================== */
+.select-dialog{
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.28);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+.select-dialog.active{ display: flex; }
+.select-dialog .dialog-box{
+    background: var(--bg-menu);
+    border: 1px solid #8a8a8a;
+    box-shadow: var(--shadow-modal);
+    padding: 16px;
+    min-width: 240px;
+    max-width: 420px;
+    color: var(--text);
+}
+.select-dialog .dialog-box h4{
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+.select-dialog .dialog-box button{
+    display: block;
+    width: 100%;
+    text-align: left;
+    margin: 3px 0;
+    height: 26px;
+    padding: 0 10px;
+    background: var(--bg-button);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+}
+.select-dialog .dialog-box button:hover{ background: var(--bg-hover); border-color: #8fb8da; }
+.select-dialog .dialog-box .cancel-btn{
+    text-align: center;
+    margin-top: 10px;
+    color: var(--danger);
+    border-color: #d9a49f;
+}
+.select-dialog .dialog-box .cancel-btn:hover{ background: var(--danger); border-color: var(--danger); color:#fff; }
+
+/* ===================================================================
+   帮助侧栏
+   =================================================================== */
+.help-overlay{
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.22);
+    z-index: 1999;
+    display: none;
+}
+.help-overlay.active{ display: block; }
+
+.help-sidebar{
+    position: fixed;
+    top: 0;
+    right: -420px;
+    width: 400px;
+    height: 100%;
+    background: var(--bg);
+    border-left: 1px solid var(--border-strong);
+    box-shadow: -6px 0 24px rgba(0,0,0,.16);
+    display: flex;
+    flex-direction: column;
+    z-index: 2000;
+    transition: right .3s ease;
+}
+.help-sidebar.active{ right: 0; }
+.help-sidebar .help-header{
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    background: var(--bg-toolbar);
+    border-bottom: 1px solid var(--border-strong);
+}
+.help-sidebar .help-header h2{
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+.help-sidebar .help-header .close-btn{
+    color: var(--danger);
+    border-color: #d9a49f;
+    background: var(--bg-button);
+    padding: 2px 14px;
+}
+.help-sidebar .help-header .close-btn:hover{ background: var(--danger); border-color: var(--danger); color:#fff; }
+.help-sidebar .help-body{
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text);
+    word-wrap: break-word;
+    user-select: text;
+}
+.help-sidebar .help-body h3{
+    color: var(--text);
+    font-size: 13px;
+    margin: 14px 0 6px;
+    padding-left: 8px;
+    border-left: 3px solid var(--accent);
+}
+.help-sidebar .help-body p,
+.help-sidebar .help-body li{ margin: 4px 0; }
+.help-sidebar .help-body ul{ padding-left: 20px; }
+.help-sidebar .help-body code{
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    background: var(--bg-input);
+    color: var(--accent);
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+}
+.help-sidebar .help-body .section{ margin-bottom: 12px; }
+
+/* ===================================================================
+   3D 视图
+   =================================================================== */
+.view3d-container{
+    position: relative;
+    width: 0;
+    flex: 0 0 0;
+    height: 100%;
+    background: var(--bg-card);
+    border-left: 1px solid var(--border-strong);
+    overflow: hidden;
+    flex-shrink: 0;
+    transition: flex .3s ease;
+}
+.view3d-container.active{
+    flex: 0 0 50%;
+    display: flex;
+}
+#threeContainer{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+.three-controls{
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    background: var(--bg-three-ctrl);
+    border: 1px solid var(--border-strong);
+    padding: 5px 10px;
+    z-index: 60;
+}
+.three-controls span{ color: var(--text-dim); font-size: 11px; }
+.three-controls button{
+    height: 22px;
+    padding: 0 9px;
+    font-size: 11px;
+    background: var(--bg-button);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+}
+.three-controls button:hover{ background: var(--bg-hover); border-color: #8fb8da; }
+.three-controls .mode-btn.active{
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+}
+.three-controls label{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-dim);
+    font-size: 11px;
+}
+.three-controls input[type="number"]{
+    width: 58px;
+    height: 22px;
+    font-size: 11px;
+    text-align: center;
+}
+.view3d-container .close-3d{
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 61;
+    color: var(--danger);
+    border-color: #d9a49f;
+    background: var(--bg-button);
+    height: 24px;
+    padding: 0 12px;
+}
+.view3d-container .close-3d:hover{ background: var(--danger); border-color: var(--danger); color:#fff; }
+.view3d-container .reset-camera-btn{
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    z-index: 61;
+    height: 24px;
+    padding: 0 12px;
+    background: var(--bg-button);
+}
+.view3d-container .three-info{
+    position: absolute;
+    bottom: 10px;
+    right: 12px;
+    z-index: 60;
+    font-size: 11px;
+    color: var(--text-faint);
+    pointer-events: none;
+}
+
+/* ===================================================================
+   模态框（编译 / 设置）
+   =================================================================== */
+.modal{
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.3);
+    z-index: 3000;
+    display: none;
+    justify-content: center;
+    align-items: center;
+}
+.modal.active{ display: flex; }
+.modal-box{
+    background: var(--bg);
+    border: 1px solid #8a8a8a;
+    box-shadow: var(--shadow-modal);
+    width: 92%;
+    max-width: 660px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    color: var(--text);
+}
+.modal-head{
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 14px;
+    background: var(--bg-toolbar);
+    border-bottom: 1px solid var(--border-strong);
+}
+.modal-head h3{ font-size: 13px; font-weight: 600; color: var(--text); }
+.modal-head h4{ font-size: 13px; font-weight: 600; }
+.modal-body{
+    padding: 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-size: 12px;
+}
+.modal-body label{
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-dim);
+    font-size: 12px;
+}
+.modal-body label.chk{ cursor: pointer; }
+.field-row{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    align-items: center;
+}
+.field-block{
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    padding: 8px 10px;
+}
+.field-head{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+.field-block input[type="file"]{
+    width: 100%;
+    font-size: 12px;
+    color: var(--text-dim);
+}
+.btn-row{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.btn-row.right{ justify-content: flex-end; }
+.section{
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.section h4{
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+}
+.hint{ font-size: 11px; color: var(--text-faint); }
+.log-box{
+    background: var(--bg-log);
+    border: 1px solid var(--border);
+    padding: 6px 8px;
+    max-height: 180px;
+    overflow-y: auto;
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--text);
+    user-select: text;
+}
+.dl-area{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.dl-area:empty{ display: none; }
+
+/* 设置面板 */
+#settingsDialog .modal-box{ max-width: 460px; }
+#settingsDialog .modal-body > label{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    font-size: 12px;
+}
+#settingsDialog .modal-body input[type="text"]{ width: 200px; }
+
+/* ===================================================================
+   响应式
+   =================================================================== */
+@media (max-width: 900px){
+    .panel{ width: 270px; padding: 6px 8px; }
+    .pixel{ width: 22px; height: 22px; }
+    .view3d-container.active{ flex: 0 0 45%; }
+}
+@media (max-width: 640px){
+    .panel{ width: 210px; font-size: 11px; }
+    .pixel{ width: 16px; height: 16px; }
+    .toolbar{ padding: 3px 4px; }
+    .toolbar button, .toolbar a{ padding: 0 7px; font-size: 11px; }
+    .zoom-bar input[type="range"]{ width: 90px; }
+}
+    </style>
+</head>
+<body>
+
+<!-- ==================================================================
+     工具栏
+     ================================================================== -->
+<div class="toolbar" id="toolbar">
+
+    <!-- ───────── 第 1 行：顶部按钮栏 ───────── -->
+    <div class="tb-row">
+        <button id="toggleLevelPropsBtn" class="sq" title="折叠 / 展开 Level 属性">▲</button>
+
+        <!-- 文件下拉 -->
+        <div class="dropdown">
+            <button class="dropdown-toggle">📁 文件 ▾</button>
+            <div class="dropdown-menu">
+                <button id="loadXmlBtn">📂 加载 XML+PNG</button>
+                <button id="exportPngBtn">🖼 导出 PNG</button>
+                <button id="exportXmlBtn">📄 导出 XML</button>
+                <button id="exportZipBtn">📦 导出 ZIP</button>
+            </div>
+        </div>
+        <input type="file" id="fileXmlInput" accept=".xml,.png,.zip" multiple style="display:none;">
+        <button id="projectManagerBtn">📁 项目</button>
+        <button id="manualSaveBtn" class="primary" style="display:none;">💾 保存</button>
+        <button id="compileBtn">📦 编译</button>
+        <button id="gameManagerBtn">🎮 游戏管理器</button>
+        <button class="primary" onclick="launchGame()">🎮 启动游戏</button>
+        <button id="undoBtn" title="撤销 (Ctrl+Z)">↶ 撤销</button>
+        <button id="redoBtn" title="重做 (Ctrl+Y)">↷ 重做</button>
+
+        <div class="spacer"></div>
+
+        <!-- 工具下拉（靠右） -->
+        <div class="dropdown">
+            <button class="dropdown-toggle">🛠 工具 ▾</button>
+            <div class="dropdown-menu">
+                <button id="toolRecorderBtn">按键事件录制器</button>
+                <a href="./misc/pic2lvlmap.html" target="_blank">图片转关卡地图</a>
+                <a href="./misc/levelgen.html" target="_blank">关卡生成器</a>
+                <a href="./misc/profedit.html" target="_blank">移动版存档编辑器</a>
+            </div>
+        </div>
+        <button id="settingsBtn">⚙ 设置</button>
+        <button id="helpBtn">帮助</button>
+    </div>
+
+    <!-- ───────── Level 属性行（可折叠） ───────── -->
+    <div class="level-props" id="levelPropsArea">
+        <label>ID <input type="text" id="levelId" value="10001" style="width:64px;"></label>
+        <label>Name <input type="text" id="levelName" value="MyLevel" style="width:100px;"></label>
+        <label>Time <input type="text" id="levelTime" value="9,25,55,85,145" style="width:120px;" title="5个递增数字，逗号分隔"></label>
+        <label>Size
+            <input type="number" id="sizeW" value="10" min="1" max="6000" style="width:60px;">×
+            <input type="number" id="sizeL" value="10" min="1" max="6000" style="width:60px;">×
+            <input type="number" id="sizeH" value="3" min="1" max="1000" style="width:60px;">
+        </label>
+        <label>Spawn <input type="text" id="spawnPoint" value="3,5,1" style="width:70px;" title="X,Y,Z (0基)"></label>
+        <label>Exit <input type="text" id="exitPoint" value="7,5,1" style="width:70px;" title="X,Y,Z (0基)"></label>
+        <label>Theme <input type="number" id="levelTheme" value="0" min="0" max="3" style="width:48px;"></label>
+        <label>MusicJava <input type="number" id="musicJava" value="0" min="0" max="11" style="width:48px;"></label>
+        <label>Music <input type="number" id="music" value="6" min="0" max="24" style="width:48px;"></label>
+        <label>Zoom <input type="number" id="levelZoom" value="-1" min="-1" max="6" style="width:48px;"></label>
+        <label><input type="checkbox" id="levelUseAngle"></label>
+        <label>Angle <input type="number" id="levelAngle" value="22" min="-184" max="184" style="width:52px;"></label>
+        <label>FOV <input type="number" id="levelFov" value="22" min="0" max="184" style="width:52px;"></label>
+        <label>ModelTheme <input type="number" id="modelTheme" value="0" min="0" style="width:48px;"></label>
+    </div>
+
+    <!-- ───────── 第 2 行：工具按钮 ───────── -->
+    <div class="tb-row">
+        <span class="tb-label">工具</span>
+        <button id="toolStatic" class="active">静态方块</button>
+        <button id="toolMoving">移动方块</button>
+        <button id="toolWaypoint">路点</button>
+        <button id="toolFalling">掉落方块</button>
+        <button id="toolPrism">棱柱</button>
+        <button id="toolResizerGrow">放大器</button>
+        <button id="toolResizerShrink">缩小器</button>
+        <button id="toolBumper">撞击器</button>
+        <button id="toolCheckpoint">存档点</button>
+        <button id="toolCameraTrigger">相机触发器</button>
+        <button id="toolButton">按钮</button>
+        <button onclick="addButtonSequence()">创建按钮序列</button>
+        <button id="toolSeqButton">序列子按钮</button>
+        <button id="toolOtherCube">提示方块</button>
+        <button id="toolDarkCube">黑暗方块</button>
+    </div>
+
+    <!-- ───────── 第 3 行：橡皮 / 清空层 / 选择 + 模式相关 ───────── -->
+    <div class="tb-row">
+        <button id="toolEraser">橡皮擦</button>
+        <button id="clearLayerBtn">清空层</button>
+        <button id="toolMultiSelect">选择</button>
+
+        <div class="sep"></div>
+
+        <span class="tb-label">模式</span>
+        <button id="toolSingle" class="active">单点</button>
+        <button id="toolBrush">画笔</button>
+
+        <label class="tb-label">颜色 <input type="color" id="staticColorPicker" value="#ffff80"></label>
+
+        <div class="sep"></div>
+
+        <label class="chk"><input type="checkbox" id="canvasAddMode"> 添加模式</label>
+        <label class="chk"><input type="checkbox" id="autoNameCheck" checked> 自动命名</label>
+        <label class="chk"><input type="checkbox" id="keepPrevProps" checked> 保留上次属性</label>
+
+        <div id="unifiedMovementContainer">
+            <label class="chk"><input type="checkbox" id="unifiedMovementCheck"> 统一运动</label>
+            <select id="unifiedBaseSelect" disabled>
+                <option value="">— 选择基准移动平台 —</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- ───────── 第 4 行：层数 / 缩放 / 3D 编辑 ───────── -->
+    <div class="tb-row center-row">
+        <span class="tb-label">层</span>
+        <button id="layerDecreaseBtn" class="sq" title="上一层">−</button>
+        <input type="number" id="layerSelect" value="0" min="0" max="9" style="width:56px;">
+        <button id="layerIncreaseBtn" class="sq" title="下一层">+</button>
+        
+        <div class="sep"></div>
+        
+        <span class="tb-label">缩放</span>
+        <input type="range" id="zoomSlider" min="10" max="500" value="65" step="5" style="width:100px;">
+        <input type="number" id="zoomNumber" min="10" value="65" step="5" style="width:54px;">
+        <span class="tb-label">%</span>
+        
+        <div class="sep"></div>
+
+        <button id="toggle3dBtn">🧊 3D 编辑</button>
+        <label class="tb-label">
+            3D 宽度
+            <input type="range" id="width3dSlider" min="5" max="95" value="40" step="1" style="width:120px;">
+            <input type="number" id="width3dNumber" min="5" max="95" value="40" style="width:54px;">
+            %
+        </label>
+    </div>
+</div>
+
+<!-- ==================================================================
+     主区域
+     ================================================================== -->
+<div class="main-area">
+
+    <!-- 2D 画布 -->
+    <div class="canvas-wrapper" id="canvasWrapper">
+        <div class="canvas-wrap" id="canvasWrap">
+            <div class="grid-info" id="gridInfo">Z=0 | 10×10</div>
+            <div id="gridWrapper">
+                <div id="pixelGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3D 视图（并排） -->
+    <div class="view3d-container" id="view3dContainer">
+        <div class="three-controls">
+            <span id="3dViewMode">模式</span>
+            <button id="modePreview" class="mode-btn active">预览</button>
+            <button id="modeSelect" class="mode-btn">选择</button>
+            <button id="modeEdit" class="mode-btn">编辑</button>
+            <span>视图</span>
+            <button id="viewFrontBtn">正</button>
+            <button id="viewTopBtn">俯</button>
+            <button id="viewSideBtn">侧</button>
+            <label>缩放 <input type="number" id="cameraDistInput" value="15" min="0.1" step="0.1"></label>
+        </div>
+        <button class="close-3d" id="close3dBtn">✕ 关闭</button>
+        <button class="reset-camera-btn" id="resetCameraBtn">⟲ 重置视角</button>
+        <div id="threeContainer"></div>
+        <div class="three-info" id="modeHint">鼠标拖动旋转 | 滚轮缩放</div>
+    </div>
+
+    <!-- 属性面板 -->
+    <div class="panel" id="panel">
+        <h3>属性面板</h3>
+        <div class="panel-content-area" id="panelContent">
+            <div class="empty-msg">点击画布上的元素查看属性</div>
+        </div>
+        <div class="elem-list-area">
+            <h3>
+                元素列表
+                <label for="elemFilterSelect" style="color:var(--text-dim);font-size:12px;">筛选：</label>
+                <select id="elemFilterSelect">
+                    <option value="all">全部</option>
+                    <option value="moving">移动平台</option>
+                    <option value="falling">掉落平台</option>
+                    <option value="prism">棱柱</option>
+                    <option value="resizer">尺寸调整器</option>
+                    <option value="bumper">撞击器</option>
+                    <option value="checkpoint">存档点</option>
+                    <option value="cameratrigger">相机触发</option>
+                    <option value="button">按钮</option>
+                    <option value="buttonsequence">按钮序列</option>
+                    <option value="othercube">提示方块</option>
+                    <option value="darkcube">黑暗方块</option>
+                </select>
+            </h3>
+            <div id="elemListContainer" class="elem-list">
+                <div style="color:var(--text-faint);font-size:12px;padding:4px;">暂无元素</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==================================================================
+     状态栏 / 显示控制
+     ================================================================== -->
+<div class="status-bar">
+    <span>坐标: <span id="mouseCoord" class="coord-display">( -, - )</span></span>
+    <span id="statusRight">静态: 0 | 移动: 0 | 掉落: 0 | 棱柱: 0 | 放大: 0 | 缩小: 0 | 撞击: 0 | 存档: 0 | 相机: 0 | 按钮: 0 | 提示: 0 | 黑暗: 0 | 按钮序列: 0</span>
+</div>
+
+<div class="module-area" id="visibilityArea">
+    <div id="visibilityCheckboxes">显示控制：</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ==================================================================
+     选择对话框
+     ================================================================== -->
+<div class="select-dialog" id="selectDialog">
+    <div class="dialog-box">
+        <h4>选择元素</h4>
+        <div id="dialogOptions"></div>
+        <button class="cancel-btn" onclick="closeSelectDialog()">取消</button>
+    </div>
+</div>
+
+<!-- ==================================================================
+     帮助侧栏
+     ================================================================== -->
+<div class="help-overlay" id="helpOverlay"></div>
+<div class="help-sidebar" id="helpSidebar">
+    <div class="help-header">
+        <h2>📖 帮助文档</h2>
+        <button class="close-btn" id="helpCloseBtn">关闭</button>
+    </div>
+    <div class="help-body" id="helpBody"></div>
+</div>
+
+<!-- ==================================================================
+     编译对话框
+     ================================================================== -->
+<div id="compileDialog" class="modal">
+    <div class="modal-box">
+        <div class="modal-head">
+            <h3>📦 编译关卡</h3>
+            <button id="closeCompileDialogBtn" class="btn-danger">✕ 关闭</button>
+        </div>
+        <div class="modal-body">
+
+            <div class="field-row">
+                <label>自定义文件名
+                    <input type="text" id="compileCustomName" placeholder="留空则使用原文件名" style="width:200px;">
+                </label>
+                <label>主题
+                    <select id="compileTheme">
+                        <option value="0">0 (白色)</option>
+                        <option value="1">1 (浅灰)</option>
+                        <option value="2">2 (深灰)</option>
+                        <option value="3" selected>3 (黑色)</option>
+                    </select>
+                </label>
+            </div>
+
+            <div class="field-row">
+                <label class="chk"><input type="checkbox" id="compilePhoneMode"> 编译手机版（时间阈值×100）</label>
+                <label class="chk"><input type="checkbox" id="compileLayeredTexture" checked> 原版风格模型</label>
+                <label class="chk"><input type="checkbox" id="compileSkipEso"> 不生成 ESO 模型</label>
+            </div>
+
+            <div class="field-block">
+                <div class="field-head">
+                    <label for="compileXmlInput">拖入 / 选择 XML / ZIP 文件：</label>
+                    <button id="clearXmlBtn" class="btn-sm">清除 XML / ZIP</button>
+                </div>
+                <input type="file" id="compileXmlInput" accept=".xml,.zip">
+            </div>
+
+            <div class="field-block">
+                <div class="field-head">
+                    <label for="compilePngInput">拖入 / 选择 PNG 层文件（可多选）：</label>
+                    <button id="clearPngBtn" class="btn-sm">清除 PNG</button>
+                </div>
+                <input type="file" id="compilePngInput" accept=".png" multiple>
+            </div>
+
+            <div class="btn-row">
+                <button id="clearAllBtn" class="btn-danger">清除全部</button>
+                <button id="importCurrentBtn">📥 导入当前关卡</button>
+                <button id="compileImportBtn" class="primary">📂 编译</button>
+            </div>
+
+            <div class="section">
+                <h4>🔄 反编译 BIN</h4>
+                <div class="btn-row">
+                    <button id="decompileSelectBtn">📂 选择 BIN 文件</button>
+                    <input type="file" id="decompileBinInput" accept=".bin" style="display:none;">
+                    <button id="decompileActionBtn">⚙️ 反编译</button>
+                    <button id="clearDecompileBtn" class="btn-danger">🗑️ 清除文件</button>
+                    <label class="chk">
+                        <input type="checkbox" id="decompileStaticMovingToPng">
+                        静止移动方块写入 PNG（不输出到 XML）
+                    </label>
+                </div>
+                <div class="hint">选择 .bin 文件，然后点击反编译（或拖入 .bin 文件）</div>
+                <div id="decompileDownloadArea" class="dl-area"></div>
+            </div>
+
+            <div id="compileLog" class="log-box"></div>
+            <div id="compileDownloadArea" class="dl-area"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ==================================================================
+     设置对话框
+     ================================================================== -->
+<div id="settingsDialog" class="modal">
+    <div class="modal-box">
+        <div class="modal-head">
+            <h3>⚙ 设置</h3>
+        </div>
+        <div class="modal-body">
+            <label class="chk"><input type="checkbox" id="settingDarkMode"> 夜间模式（深色配色）</label>
+
+            <label class="chk"><input type="checkbox" id="settingUseShareDownload"> 手机下载（用 Web Share API）</label>
+            <label class="chk"><input type="checkbox" id="settingMsIncludeEmpty"> 多选框选时可选中空格子</label>
+            <label class="chk"><input type="checkbox" id="settingPasteOverwrite"> 粘贴时覆盖目标位置原有元素（不勾 = 直接添加）</label>
+            <label class="chk"><input type="checkbox" id="settingImportNewProject"> 导入 XML / PNG / ZIP 时新建项目（不勾 = 覆盖当前项目）</label>
+            <label class="chk"><input type="checkbox" id="settingAutoSave"> 开启自动保存</label>
+
+            <div class="field-row" style="margin-left:20px;">
+                <label for="settingAutoSaveInterval">保存间隔：</label>
+                <select id="settingAutoSaveInterval">
+                    <option value="0">实时保存</option>
+                    <option value="60">1 分钟</option>
+                    <option value="300">5 分钟</option>
+                    <option value="-1">自定义</option>
+                </select>
+                <div id="customIntervalWrap" style="display:none;align-items:center;gap:4px;">
+                    <input type="number" id="settingAutoSaveCustom" min="1" value="10" style="width:64px;">
+                    <span>分钟</span>
+                </div>
+            </div>
+
+            <label class="chk"><input type="checkbox" id="settingEnableCompression"> 开启大图压缩（降低存储占用）</label>
+
+            <div class="field-row">
+                <label>游戏程序路径：
+                    <input type="text" id="settingGamePath" style="width:170px;">
+                    <button onclick="pickFile('settingGamePath')" class="btn-sm">选择</button>
+                </label>
+            </div>
+
+            <label class="chk">
+                <input type="checkbox" id="settingUseCustomExportDir"> 导出文件到指定目录（不勾选则每次弹出保存窗口）
+            </label>
+            <div class="field-row" style="margin-left:20px;">
+                <label>导出目录：
+                    <input type="text" id="settingExportDir" placeholder="未指定" style="width:170px;" disabled>
+                    <button onclick="pickDir('settingExportDir')" class="btn-sm" id="settingExportDirBtn" disabled>选择</button>
+                </label>
+            </div>
+
+            <div class="btn-row right" style="margin-top:6px;">
+                <button class="btn-danger" onclick="closeSettingsDialog()">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==================================================================
+     内联脚本：下拉菜单 + 夜间模式
+     ================================================================== -->
+<script>
+(function () {
+
+    /* ---------- 下拉菜单 ---------- */
+    document.querySelectorAll('.dropdown-toggle').forEach(function (toggle) {
+        toggle.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var dropdown = toggle.closest('.dropdown');
+            var isOpen = dropdown.classList.contains('open');
+            document.querySelectorAll('.dropdown').forEach(function (d) {
+                d.classList.remove('open');
+            });
+            if (!isOpen) dropdown.classList.add('open');
+        });
+    });
+
+    document.addEventListener('click', function () {
+        document.querySelectorAll('.dropdown').forEach(function (d) {
+            d.classList.remove('open');
+        });
+    });
+
+    /* 下拉菜单内的条目被点击后自动关闭 */
+    document.querySelectorAll('.dropdown-menu').forEach(function (menu) {
+        menu.addEventListener('click', function (e) {
+            if (e.target.closest('button, a')) {
+                var dropdown = menu.closest('.dropdown');
+                if (dropdown) dropdown.classList.remove('open');
+            }
+        });
+    });
+
+    /* ---------- 夜间模式 ---------- */
+    var darkCheck = document.getElementById('settingDarkMode');
+    if (darkCheck) {
+        try {
+            darkCheck.checked = localStorage.getItem('edgeEditorDarkMode') === '1';
+        } catch (e) {}
+
+        darkCheck.addEventListener('change', function () {
+            var on = this.checked;
+            document.documentElement.classList.toggle('dark', on);
+            try { localStorage.setItem('edgeEditorDarkMode', on ? '1' : '0'); } catch (e) {}
+            // ★ 新增：触发 2D 画布和 3D 场景刷新颜色
+            if (typeof requestRender === 'function') requestRender();
+            if (typeof window.updateThreeTheme === 'function') window.updateThreeTheme();
+        });
+    }
+
+})();
+</script>
+
+</body>
+<!-- 顺序不能随便改 -->
+<script src="./js/edgelxe_utils.js"></script>
+<script src="./js/edgelxe_cache.js"></script>
+<script src="./js/edgelxe_projects.js"></script>
+<script src="./js/edgelxe_render2d.js"></script>
+<script src="./js/edgelxe_panel.js"></script>
+<script src="./js/edgelxe_file.js"></script>
+<script src="./js/edgelxe_3d.js"></script>
+<script src="./js/edgelxe_quickfill.js"></script>
+<script src="./js/edgelxe_select.js"></script>
+<script src="./js/edgelevelcompiler.js"></script>
+<script src="./js/edgelxe_elem.js"></script>
+<script src="./js/edgelxe_misc.js"></script>
+<script src="./js/edgelxe_init.js"></script>
+</html>

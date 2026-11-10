@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EDGE 关卡生成器 v7.2 Pro</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI','PingFang SC',Roboto,system-ui,sans-serif;background:#0f1219;color:#e8edf5;min-height:100vh;padding:24px;display:flex;justify-content:center;align-items:flex-start}
+.app{max-width:1240px;width:100%;background:#1a1f2b;border-radius:24px;padding:30px 34px 36px;box-shadow:0 20px 60px rgba(0,0,0,.7);border:1px solid #2c3342}
+.header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:20px;padding-bottom:18px;border-bottom:2px solid #2c3342}
+.header h1{font-size:25px;font-weight:700;background:linear-gradient(135deg,#8ab4f8,#6dd5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.header .sub{font-size:13px;color:#7a849e;background:#252d3d;padding:4px 14px;border-radius:20px;border:1px solid #323b4f}
+.main-tabs{display:flex;gap:6px;margin-bottom:20px;background:#141a26;padding:6px;border-radius:14px;border:1px solid #252d3f}
+.main-tab{flex:1;padding:11px 18px;border:none;border-radius:10px;background:transparent;color:#8692b0;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;font-family:inherit}
+.main-tab:hover{background:#1c2436;color:#bcc8e6}
+.main-tab.active{background:#2c364f;color:#e8edf5;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+.tab-pane.hidden{display:none}
+.config-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:12px 16px;background:#141a26;border:1px solid #252d3f;border-radius:14px;padding:16px 18px;margin-bottom:14px}
+.cfg-item{display:flex;flex-direction:column;gap:5px}
+.cfg-item label{font-size:12px;color:#8692b0;font-weight:600;letter-spacing:.3px}
+.cfg-item input[type="text"],.cfg-item input[type="number"],.cfg-item select{background:#0d111b;border:1px solid #2c364f;border-radius:8px;padding:7px 11px;color:#e0e8fc;font-size:13px;font-family:'JetBrains Mono','Consolas',monospace;outline:none;transition:border-color .2s;width:100%}
+.cfg-item input:focus,.cfg-item select:focus{border-color:#3b82f6}
+.cfg-item select{font-family:inherit;cursor:pointer}
+.mode-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px 14px;background:#141a26;border:1px solid #252d3f;border-radius:14px;padding:14px 18px;margin-bottom:14px}
+.mode-grid .title{grid-column:1/-1;font-size:12px;color:#8692b0;font-weight:600;letter-spacing:.3px;margin-bottom:2px}
+.mode-item{display:flex;align-items:center;gap:8px;background:#0d111b;padding:10px 14px;border-radius:10px;border:1px solid #2c364f;cursor:pointer;transition:border-color .2s,background .2s}
+.mode-item:hover{border-color:#3b82f6;background:#1a2130}
+.mode-item input[type="checkbox"]{width:16px;height:16px;accent-color:#3b82f6;flex-shrink:0}
+.mode-item .lbl{font-size:13px;color:#c8d2ec}
+.mode-item .desc{font-size:11px;color:#5d6a88;line-height:1.3}
+.action-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.btn{padding:10px 24px;border:none;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;background:#2c364f;color:#bcc8e6;display:inline-flex;align-items:center;gap:8px;font-family:inherit}
+.btn:hover{background:#384465;color:#e8efff;transform:translateY(-1px)}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:#3b82f6;color:#fff;box-shadow:0 4px 16px rgba(59,130,246,.25)}
+.btn.primary:hover{background:#4a8ff7}
+.btn.secondary{background:#1f273b;color:#9aa8c9}
+.btn.secondary:hover{background:#2a3349;color:#c8d2ec}
+.btn.green{background:#1f3a2a;color:#86e0a5}
+.btn.green:hover{background:#2a5038;color:#b8f0cc}
+.btn.small{padding:5px 14px;font-size:12px;border-radius:8px}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none!important}
+.preview-card{background:#141a26;border:1px solid #252d3f;border-radius:14px;padding:14px 16px;margin-bottom:16px}
+.preview-card .head{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#8692b0;margin-bottom:10px;flex-wrap:wrap;gap:10px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:11.5px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px}
+.canvas-wrap{display:flex;justify-content:center;overflow:auto;background:#0d111b;border-radius:10px;padding:10px;border:1px solid #202838;max-height:520px}
+canvas#preview{display:block;image-rendering:pixelated}
+.out-tabs{display:flex;gap:6px;margin-bottom:10px}
+.out-tab{padding:8px 20px;border:none;border-radius:9px;background:#141a26;color:#7a849e;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;font-family:inherit;border:1px solid #252d3f}
+.out-tab:hover{background:#1c2436;color:#bcc8e6}
+.out-tab.active{background:#2c364f;color:#e8edf5;border-color:#3b4868}
+.out-pane{background:#0d111b;border:1px solid #202838;border-radius:12px;padding:14px 16px;font-family:'JetBrains Mono','Fira Code','Consolas',monospace;font-size:12.5px;line-height:1.65;color:#c8d2ec;white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto;margin-bottom:12px}
+.out-pane.hidden{display:none}
+.out-pane::-webkit-scrollbar{width:6px;height:6px}
+.out-pane::-webkit-scrollbar-thumb{background:#2c364f;border-radius:10px}
+.out-pane .ph{color:#3b4868;text-align:center;padding:40px 0;font-family:'Segoe UI',sans-serif}
+.out-actions{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.stats{display:flex;flex-wrap:wrap;gap:12px;font-size:12.5px;color:#8692b0;background:#141a26;border-radius:12px;padding:10px 16px;border:1px solid #252d3f;margin-bottom:14px}
+.stats b{color:#c8d2ec;font-weight:600}
+.png-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;max-height:420px;overflow-y:auto;padding:4px}
+.png-grid::-webkit-scrollbar{width:6px}
+.png-grid::-webkit-scrollbar-thumb{background:#2c364f;border-radius:10px}
+.png-layer{background:#141a26;border:1px solid #252d3f;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.png-layer .head{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:#8692b0;font-family:'JetBrains Mono',monospace}
+.png-layer .head .zlabel{color:#8ab4f8;font-weight:600}
+.png-layer canvas{width:100%;height:auto;display:block;image-rendering:pixelated;image-rendering:crisp-edges;border-radius:6px;border:1px solid #202838;background:#000}
+.conv-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:800px){.conv-grid{grid-template-columns:1fr}}
+.conv-card{background:#141a26;border:1px solid #252d3f;border-radius:16px;padding:18px 20px}
+.conv-card h3{font-size:15px;color:#c8d2ec;font-weight:600;margin-bottom:6px}
+.conv-card .desc{font-size:12px;color:#5d6a88;margin-bottom:14px;line-height:1.5}
+.file-input-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.file-input-row label{font-size:12.5px;color:#8692b0;font-weight:600;min-width:70px}
+.file-input-row input[type="file"]{flex:1;min-width:140px;background:#0d111b;border:1px solid #2c364f;border-radius:8px;padding:7px 11px;color:#e0e8fc;font-size:12.5px;font-family:inherit;cursor:pointer;outline:none}
+.file-input-row input[type="file"]::file-selector-button{background:#2c364f;color:#bcc8e6;border:none;padding:4px 10px;border-radius:6px;margin-right:8px;cursor:pointer;font-family:inherit;font-size:12px}
+.conv-textarea{width:100%;min-height:130px;max-height:220px;background:#0d111b;border:1px solid #2c364f;border-radius:10px;padding:10px 14px;color:#c8d2ec;font-size:12.5px;font-family:'JetBrains Mono','Consolas',monospace;line-height:1.6;resize:vertical;outline:none}
+.conv-textarea:focus{border-color:#3b82f6}
+.conv-mini-preview{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;max-height:260px;overflow-y:auto;background:#0d111b;border:1px solid #202838;border-radius:10px;padding:10px;margin-top:10px}
+.conv-mini-preview .ph{grid-column:1/-1;text-align:center;color:#3b4868;font-size:12px;padding:30px 10px}
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#1e273d;color:#e0e8fc;padding:11px 26px;border-radius:13px;font-size:13.5px;border:1px solid #2f3a55;box-shadow:0 10px 40px rgba(0,0,0,.6);z-index:999;opacity:0;pointer-events:none;transition:opacity .3s,transform .3s;max-width:90%;text-align:center}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.error{border-color:#b34a4a;background:#2a1a1a}
+.toast.success{border-color:#3d8a5a;background:#1a2a20}
+</style>
+</head>
+<body>
+
+<div class="app">
+    <div class="header">
+        <h1>🎲 EDGE 关卡生成器 v7.2 Pro</h1>
+        <span class="sub">起点逻辑增强 · 连通防卡死 · 渲染增强</span>
+    </div>
+
+    <div class="main-tabs">
+        <button class="main-tab active" data-mtab="gen">🎲 生成器</button>
+        <button class="main-tab" data-mtab="conv">🔄 导入转换</button>
+    </div>
+
+    <div class="tab-pane" id="pane-gen">
+        <div class="config-grid">
+            <div class="cfg-item"><label>随机种子</label><input type="text" id="cfgSeed" placeholder="留空 = 随机"></div>
+            <div class="cfg-item"><label>关卡宽度 W</label><input type="number" id="cfgW" value="24" min="1"></div>
+            <div class="cfg-item"><label>关卡长度 L</label><input type="number" id="cfgL" value="30" min="1"></div>
+            <div class="cfg-item"><label>关卡高度 H</label><input type="number" id="cfgH" value="3" min="1"></div>
+            <div class="cfg-item"><label>关卡 ID</label><input type="text" id="cfgId" placeholder="留空 = 随机"></div>
+            <div class="cfg-item"><label>关卡名</label><input type="text" id="cfgName" placeholder="留空 = 随机"></div>
+            <div class="cfg-item"><label>起点 (x,y,z) 留空随机</label><input type="text" id="cfgSpawn" placeholder="如 5,25,1"></div>
+            <div class="cfg-item"><label>终点 (x,y,z) 留空随机</label><input type="text" id="cfgExit" placeholder="如 15,0,2"></div>
+            <div class="cfg-item"><label>静态段平均长度</label><input type="number" id="cfgStaticLen" value="6" min="2" max="20"></div>
+            <div class="cfg-item"><label>移动平台概率 %</label><input type="number" id="cfgMoveP" value="20" min="0" max="80"></div>
+            <div class="cfg-item"><label>掉落平台概率 %</label><input type="number" id="cfgFallP" value="12" min="0" max="80"></div>
+            <div class="cfg-item"><label>存档点间隔 (格)</label><input type="number" id="cfgCpInt" value="10" min="3" max="40"></div>
+            <div class="cfg-item"><label>起伏概率 %</label><input type="number" id="cfgHillyChance" value="25" min="0" max="100"></div>
+            <div class="cfg-item"><label>★ 平台密度 %</label><input type="number" id="cfgPlatformDensity" value="50" min="0" max="100"></div>
+            <div class="cfg-item"><label>装饰数量</label><input type="number" id="cfgDecoCount" value="8" min="0" max="40"></div>
+            <div class="cfg-item"><label>装饰形状</label>
+                <select id="cfgDecoShape">
+                    <option value="mixed" selected>混合随机</option>
+                    <option value="island">小岛</option>
+                    <option value="pillar">柱状</option>
+                    <option value="checker">棋盘状</option>
+                    <option value="square">方框</option>
+                    <option value="circle">圆框</option>
+                    <option value="letter">字母</option>
+                </select>
+            </div>
+            <div class="cfg-item"><label>MusicJava (0-11)</label><select id="cfgMusicJava"><option value="random" selected>🎲 随机</option></select></div>
+            <div class="cfg-item"><label>Music (0-24)</label><select id="cfgMusic"><option value="random" selected>🎲 随机</option></select></div>
+            <div class="cfg-item"><label>按钮数量 (2-5)</label><input type="number" id="cfgBtnCount" value="2" min="2" max="5"></div>
+            <div class="cfg-item"><label>按钮顺序</label>
+                <select id="cfgBtnSeq">
+                    <option value="random" selected>🎲 随机</option>
+                    <option value="true">必须按顺序</option>
+                    <option value="false">任意顺序</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="mode-grid">
+            <div class="title">🛤️ 路径模式（可多选混合）</div>
+            <label class="mode-item"><input type="checkbox" id="modeFlat" checked><div><div class="lbl">平坦模式</div><div class="desc">路径铺满静态方块</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="modePlatform"><div><div class="lbl">平台模式</div><div class="desc">路径上稀疏放置平台（可叠加其他地形）</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="modeHilly"><div><div class="lbl">起伏模式</div><div class="desc">路径在 z 方向 ±1 变化</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="modeMaze"><div><div class="lbl">迷宫模式</div><div class="desc">路径两侧 2 格厚墙（高 2 层）</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="modeTallMaze"><div><div class="lbl">高迷宫模式</div><div class="desc">墙高 +1 层（高 3 层）</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="modeBlindMaze"><div><div class="lbl">盲迷宫模式</div><div class="desc">高迷宫基础上加一层盖子（需 H≥4）</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="mixModes"><div><div class="lbl">混合模式</div><div class="desc">分多段，每段不同模式</div></div></label>
+        </div>
+
+        <div class="mode-grid">
+            <div class="title">✨ 附加内容</div>
+            <label class="mode-item"><input type="checkbox" id="cfgBranches" checked><div><div class="lbl">分叉路</div><div class="desc">从主路径分出绕行支线</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="cfgDecorations"><div><div class="lbl">场景装饰</div><div class="desc">路径外的装饰形状</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="cfgBumpers" checked><div><div class="lbl">撞击器</div><div class="desc">默认在路径侧，可自动朝向</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="cfgBumpersAsDeco"><div><div class="lbl">↳ 作为装饰</div><div class="desc">放在路径上，高度-1，方向随机</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="cfgPrisms" checked><div><div class="lbl">棱柱</div><div class="desc">生成 Prism</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="cfgCameras" checked><div><div class="lbl">相机触发器</div><div class="desc">起点 / 终点各一个</div></div></label>
+            <label class="mode-item"><input type="checkbox" id="cfgButtonPuzzle" checked><div><div class="lbl">按钮谜题</div><div class="desc">平台模式或路径足够长时触发</div></div></label>
+        </div>
+
+        <div class="action-row">
+            <button class="btn primary" id="genBtn">🎲 生成关卡</button>
+            <button class="btn secondary" id="rerollBtn">🎯 换一个种子</button>
+            <button class="btn green" id="zipBtn" disabled>📦 打包 ZIP</button>
+        </div>
+
+        <div class="preview-card">
+            <div class="head">
+                <span>🗺️ 路径预览</span>
+                <div class="legend">
+                    <span><i style="background:#4ade80"></i>起点</span>
+                    <span><i style="background:#f87171"></i>终点</span>
+                    <span><i style="background:#facc15"></i>路径方块</span>
+                    <span><i style="background:#ff8c00"></i>平台(路径加宽)</span>
+                    <span><i style="background:#60a5fa"></i>移动平台</span>
+                    <span><i style="background:#fb923c"></i>掉落平台</span>
+                    <span><i style="background:#a78bfa"></i>撞击器(障碍)</span>
+                    <span><i style="background:#c4b5fd"></i>撞击器(装饰)</span>
+                    <span><i style="background:#22d3ee"></i>棱柱</span>
+                    <span><i style="background:#f472b6"></i>存档点</span>
+                    <span><i style="background:#86e0a5"></i>分叉路</span>
+                    <span><i style="background:#fde68a"></i>按钮</span>
+                </div>
+            </div>
+            <div class="canvas-wrap"><canvas id="preview" width="560" height="560"></canvas></div>
+        </div>
+
+        <div class="stats" id="stats"><span>等待生成…</span></div>
+
+        <div class="out-tabs">
+            <button class="out-tab active" data-tab="xml">📄 XML</button>
+            <button class="out-tab" data-tab="sblock">🧱 sblock</button>
+            <button class="out-tab" data-tab="png">🖼️ PNG 图层</button>
+        </div>
+        <div class="out-actions">
+            <button class="btn small secondary" id="copyXmlBtn">📋 复制 XML</button>
+            <button class="btn small secondary" id="copySbBtn">📋 复制 sblock</button>
+            <button class="btn small secondary" id="dlXmlBtn">💾 XML</button>
+            <button class="btn small secondary" id="dlSbBtn">💾 sblock</button>
+            <button class="btn small secondary" id="dlPngBtn">🖼️ 全部 PNG</button>
+            <button class="btn small green" id="dlZipBtn">📦 ZIP</button>
+        </div>
+        <div class="out-pane" id="outXml"><div class="ph">点击「生成关卡」开始</div></div>
+        <div class="out-pane hidden" id="outSblock"><div class="ph">点击「生成关卡」开始</div></div>
+        <div class="out-pane hidden" id="outPng"><div class="png-grid" id="pngGrid"><div class="ph" style="grid-column:1/-1;">点击「生成关卡」开始</div></div></div>
+    </div>
+
+    <div class="tab-pane hidden" id="pane-conv">
+        <div class="conv-grid">
+            <div class="conv-card">
+                <h3>🖼️ → 🧱 PNG 转方块表</h3>
+                <div class="desc">上传关卡 XML 与所有 PNG 图层，自动提取所有静态方块（R=255）并输出 sblock 坐标表。</div>
+                <div class="file-input-row"><label>XML 文件</label><input type="file" id="c1Xml" accept=".xml,text/xml"></div>
+                <div class="file-input-row"><label>PNG 图层</label><input type="file" id="c1Png" accept=".png" multiple></div>
+                <div class="action-row" style="margin-top:14px;"><button class="btn primary" id="c1Btn">⚡ 提取方块表</button><button class="btn secondary" id="c1ClearBtn">🗑️ 清空</button></div>
+                <textarea class="conv-textarea" id="c1Out" placeholder="sblock 输出会显示在这里…" spellcheck="false" readonly></textarea>
+                <div class="action-row" style="margin-top:10px;"><button class="btn small secondary" id="c1CopyBtn">📋 复制</button><button class="btn small secondary" id="c1DlBtn">💾 下载 .txt</button></div>
+            </div>
+            <div class="conv-card">
+                <h3>🧱 → 🖼️ 方块表转 PNG</h3>
+                <div class="desc">上传关卡 XML（自动读尺寸/名称）与方块表文本，生成 PNG 图层。</div>
+                <div class="file-input-row"><label>XML 文件</label><input type="file" id="c2Xml" accept=".xml,text/xml"></div>
+                <div class="file-input-row"><label>关卡名</label><input type="text" class="conv-textarea" id="c2Name" style="min-height:auto;padding:7px 12px;" placeholder="level" spellcheck="false"></div>
+                <div class="file-input-row"><label>尺寸</label><input type="text" class="conv-textarea" id="c2Size" style="min-height:auto;padding:7px 12px;" placeholder="20x26x3" spellcheck="false"></div>
+                <textarea class="conv-textarea" id="c2Blocks" placeholder="粘贴方块表，每行 sblock(x,y,z)" spellcheck="false"></textarea>
+                <div class="action-row" style="margin-top:14px;"><button class="btn primary" id="c2Btn">⚡ 生成 PNG</button><button class="btn secondary" id="c2DlBtn" disabled>💾 下载全部</button><button class="btn secondary" id="c2ClearBtn">🗑️ 清空</button></div>
+                <div class="conv-mini-preview" id="c2Preview"><div class="ph">PNG 预览会显示在这里…</div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+'use strict';
+
+const MUSIC_JAVA_NAMES=['00_menus','01_braintonik','02_cube_dance','03_essai_2','04_essai_01','05_test','06_mysterycube','07_03_EDGE','08_jungle','09_RetardTonic','10_oldschool_simon','11_planant'];
+const MUSIC_NAMES=['00_Title','01_Eternity','02_Quiet','03_Pad','04_Jingle','05_Tec','06_Kakkoi','07_Dark','08_Squadron','09_8bits','10_Pixel','11_Jupiter','12_Shame','13_Debrief','14_Space','15_Voyage_geometrique','16_Mzone','17_R2','18_Mystery_cube','19_Duty','20_PerfectCell','21_fun','22_lol','23_lostway','24_wall_street'];
+const LETTERS={'A':['010','101','111','101','101'],'B':['110','101','110','101','110'],'C':['011','100','100','100','011'],'D':['110','101','101','101','110'],'E':['111','100','110','100','111'],'F':['111','100','110','100','100'],'H':['101','101','111','101','101'],'I':['111','010','010','010','111'],'J':['001','001','001','101','010'],'K':['101','101','110','101','101'],'L':['100','100','100','100','111'],'M':['101','111','111','101','101'],'N':['101','111','111','111','101'],'O':['010','101','101','101','010'],'P':['110','101','110','100','100'],'R':['110','101','110','101','101'],'S':['011','100','010','001','110'],'T':['111','010','010','010','010'],'U':['101','101','101','101','111'],'V':['101','101','101','010','010'],'W':['101','101','111','111','101'],'X':['101','101','010','101','101'],'Y':['101','101','010','010','010'],'Z':['111','001','010','100','111']};
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+function hashString(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function randInt(rng,min,max){return min+Math.floor(rng()*(max-min+1));}
+function escapeXML(s){return String(s).replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]));}
+function sanitizeName(s){return String(s||'level').replace(/[\\/:*?"<>|]/g,'_').trim()||'level';}
+function shuffle(arr,rng){for(let i=arr.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+function showToast(msg,type,dur){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(type||'');t.classList.add('show');clearTimeout(t._timer);t._timer=setTimeout(()=>t.classList.remove('show'),dur||2600);}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+function canvasToBlob(canvas){return new Promise((res,rej)=>{canvas.toBlob(b=>b?res(b):rej(new Error('toBlob null')),'image/png');});}
+function triggerDownload(blob,filename){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(url),3000);}
+function parseXYZ(str){if(!str||!str.trim())return null;const m=str.trim().match(/^(-?\d+)\s*[,\s]\s*(-?\d+)\s*[,\s]\s*(-?\d+)$/);if(!m)return null;const x=+m[1],y=+m[2],z=+m[3];if(isNaN(x)||isNaN(y)||isNaN(z))return null;return{x,y,z};}
+
+function initMusicDropdowns(){
+    const sJ=document.getElementById('cfgMusicJava');
+    for(let i=0;i<MUSIC_JAVA_NAMES.length;i++){const o=document.createElement('option');o.value=i;o.textContent=i+' · '+MUSIC_JAVA_NAMES[i];sJ.appendChild(o);}
+    const sM=document.getElementById('cfgMusic');
+    for(let i=0;i<MUSIC_NAMES.length;i++){const o=document.createElement('option');o.value=i;o.textContent=i+' · '+MUSIC_NAMES[i];sM.appendChild(o);}
+}
+
+function parseXMLInfo(text){
+    const doc=new DOMParser().parseFromString(text,'text/xml');
+    const err=doc.querySelector('parsererror');
+    if(err)throw new Error('XML 解析失败');
+    const level=doc.querySelector('Level');
+    if(!level)throw new Error('未找到 <Level>');
+    const sa=level.getAttribute('Size');
+    if(!sa)throw new Error('缺少 Size');
+    const p=sa.split('x').map(s=>parseInt(s.trim(),10));
+    if(p.length!==3||p.some(isNaN))throw new Error('Size 格式错误');
+    return{W:p[0],L:p[1],H:p[2],sizeStr:sa,name:level.getAttribute('Name')||'(未命名)',id:level.getAttribute('ID')||''};
+}
+function parseBlockTable(text){
+    const out=[];const re=/sblock\s*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\)/gi;let m;
+    while((m=re.exec(text))!==null)out.push({x:+m[1],y:+m[2],z:+m[3]});
+    return out;
+}
+function extractBlocksFromPixels(data,width,height,z){
+    const out=[];
+    for(let y=0;y<height;y++){
+        for(let x=0;x<width;x++){
+            const idx=(y*width+x)*4;
+            const r=data[idx], g=data[idx+1], b=data[idx+2], a=data[idx+3];
+            if(r===255 && a>128) out.push({x,y,z});
+        }
+    }
+    return out;
+}
+function buildPngLayersFromBlocks(W,L,H,blocks){
+    const byZ=new Map();
+    for(const b of blocks){
+        if(b.z<0||b.z>=H||b.x<0||b.x>=W||b.y<0||b.y>=L)continue;
+        if(!byZ.has(b.z))byZ.set(b.z,[]);
+        byZ.get(b.z).push(b);
+    }
+    const layers=[];
+    for(let z=0;z<H;z++){
+        const c=document.createElement('canvas');
+        c.width=W;c.height=L;
+        const ctx=c.getContext('2d');
+        ctx.fillStyle='#000000';ctx.fillRect(0,0,W,L);
+        ctx.fillStyle=(z===0)?'#ffff80':'#ffffff';
+        for(const b of(byZ.get(z)||[]))ctx.fillRect(b.x,b.y,1,1);
+        layers.push({z,canvas:c,count:(byZ.get(z)||[]).length});
+    }
+    return layers;
+}
+
+function makeDecoration(shape,cx,cy,rng){
+    const cells=[];const push=(x,y,z)=>cells.push({x,y,z:(z||0)+1});
+    if(shape==='pillar'){const h=2+randInt(rng,0,1);for(let i=0;i<h;i++)push(cx,cy,i);}
+    else if(shape==='checker'){for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)if((dx+dy)%2===0)push(cx+dx,cy+dy,0);}
+    else if(shape==='square'){for(let i=-1;i<=1;i++){push(cx+i,cy-1);push(cx+i,cy+1);}push(cx-1,cy);push(cx+1,cy);}
+    else if(shape==='circle'){push(cx,cy-1);push(cx,cy+1);push(cx-1,cy);push(cx+1,cy);push(cx-1,cy-1);push(cx+1,cy-1);push(cx-1,cy+1);push(cx+1,cy+1);}
+    else if(shape==='letter'){const keys=Object.keys(LETTERS);const ch=keys[randInt(rng,0,keys.length-1)];const pat=LETTERS[ch];for(let r=0;r<pat.length;r++)for(let cc=0;cc<pat[r].length;cc++)if(pat[r][cc]==='1')push(cx+cc-1,cy+r-2);}
+    else{const offs=[[0,0],[1,0],[0,1],[1,1],[-1,0],[0,-1],[-1,-1],[1,-1],[-1,1]];shuffle(offs,rng);const n=3+randInt(rng,0,3);for(let i=0;i<n;i++)push(cx+offs[i][0],cy+offs[i][1]);}
+    return cells;
+}
+
+function computeMazeLayers(mode,pathZ,H){
+    if(mode==='maze')return{wallMinZ:Math.max(0,pathZ-1),wallMaxZ:Math.min(H-1,pathZ),lidZ:-1};
+    if(mode==='tallMaze')return{wallMinZ:Math.max(0,pathZ-1),wallMaxZ:Math.min(H-1,pathZ+1),lidZ:-1};
+    if(mode==='blindMaze'){const wMax=Math.min(H-1,pathZ+1),wMin=Math.max(0,pathZ-1);let lz=wMax+1;if(lz>=H)return{wallMinZ:wMin,wallMaxZ:wMax,lidZ:-1,fallback:true};return{wallMinZ:wMin,wallMaxZ:wMax,lidZ:lz};}
+    return null;
+}
+function getBumperDirection(bx,by,pathCells){
+    let best=null,bestDist=Infinity;
+    for(const c of pathCells){const d=Math.abs(c.x-bx)+Math.abs(c.y-by);if(d<bestDist){bestDist=d;best=c;}}
+    if(!best)return'East';
+    const dx=best.x-bx,dy=best.y-by;
+    if(Math.abs(dx)>Math.abs(dy))return dx>0?'East':'West';
+    if(Math.abs(dy)>Math.abs(dx))return dy>0?'South':'North';
+    if(dx!==0)return dx>0?'East':'West';
+    if(dy!==0)return dy>0?'South':'North';
+    return'East';
+}
+
+function makeMovingPlatform(seg,rng){
+    const T=6+randInt(rng,0,6);
+    const P=3+randInt(rng,0,5);
+    const wps=[];
+    for(let i=0;i<seg.length;i++)wps.push({x:seg[i].x,y:seg[i].y,z:seg[i].z,travel:T,pause:P});
+    for(let i=seg.length-2;i>=1;i--)wps.push({x:seg[i].x,y:seg[i].y,z:seg[i].z,travel:T,pause:P});
+    return{waypoints:wps};
+}
+
+function collectPathModes(cfg){
+    const modes=[];
+    if(cfg.modeFlat)modes.push('flat');
+    if(cfg.modeHilly)modes.push('hilly');
+    if(cfg.modeMaze)modes.push('maze');
+    if(cfg.modeTallMaze)modes.push('tallMaze');
+    if(cfg.modeBlindMaze)modes.push('blindMaze');
+    return modes;
+}
+
+function selectPlatformCenters(path,density,rng){
+    const centers=[];
+    if(density<=0||path.length<2)return centers;
+
+    centers.push({x:path[0].x,y:path[0].y,z:path[0].z,pw:5,ph:5,isAnchor:true});
+    if(path.length>2){
+        const last=path[path.length-1];
+        centers.push({x:last.x,y:last.y,z:last.z,pw:5,ph:5,isAnchor:true});
+    }
+
+    const baseGap=Math.max(3,Math.round(15-density*0.12));
+
+    let i=baseGap;
+    while(i<path.length-2){
+        const c=path[i];
+        const dpS=Math.abs(c.x-path[0].x)+Math.abs(c.y-path[0].y);
+        const dpE=Math.abs(c.x-path[path.length-1].x)+Math.abs(c.y-path[path.length-1].y);
+        if(dpS>2&&dpE>2){
+            const pw=3+randInt(rng,0,2);
+            const ph=3+randInt(rng,0,2);
+            centers.push({x:c.x,y:c.y,z:c.z,pw,ph,isAnchor:false});
+        }
+        const step=baseGap+randInt(rng,-Math.floor(baseGap/2),Math.floor(baseGap/2));
+        i+=Math.max(2,step);
+    }
+
+    return centers;
+}
+
+// ==================== 关卡生成核心逻辑 (v7.2 Pro 增强) ====================
+function generateLevel(cfg){
+    const W=cfg.W,L=cfg.L,H=cfg.H;
+    const rng=mulberry32(cfg.seed>>>0);
+
+    // ---- 起点 / 终点 ----
+    let sx,sy,sz;
+    if(cfg.spawn){sx=cfg.spawn.x;sy=cfg.spawn.y;sz=cfg.spawn.z;}
+    else{sx=randInt(rng,1,W-2);sy=L-1;sz=1;}
+    sx=Math.max(0,Math.min(W-1,sx));sy=Math.max(0,Math.min(L-1,sy));sz=Math.max(1,Math.min(H,sz));
+
+    let ex,ey,ez;
+    if(cfg.exit){ex=cfg.exit.x;ey=cfg.exit.y;ez=cfg.exit.z;}
+    else{ex=randInt(rng,1,W-2);ey=0;const maxEz=Math.max(1,Math.min(H-1,3));ez=randInt(rng,1,maxEz);}
+    ex=Math.max(0,Math.min(W-1,ex));ey=Math.max(0,Math.min(L-1,ey));ez=Math.max(1,Math.min(H,ez));
+    if(sx===ex&&sy===ey)ey=Math.max(0,sy-2);
+
+    // ---- 模式集合 ----
+    const avail=collectPathModes(cfg);
+    if(avail.length===0)avail.push('flat');
+    const filteredAvail=avail.map(m=>(m==='blindMaze'&&H<4)?'tallMaze':m);
+    const segCount=(cfg.mixModes&&filteredAvail.length>1)?Math.min(3,filteredAvail.length)+randInt(rng,0,1):1;
+
+    // ---- 生成 x/y 路径 ----
+    const xyPath=[];const seenXY=new Set();
+    const exitKey=ex+','+ey;
+    function addXY(x,y,isFinal){
+        if(x<0||x>=W||y<0||y>=L)return;
+        const k=x+','+y;
+        if(!isFinal&&k===exitKey)return;
+        if(seenXY.has(k))return;
+        seenXY.add(k);xyPath.push({x,y});
+    }
+
+    let cx=sx,cy=sy;
+    addXY(cx,cy);
+    let dir=rng()<0.5?1:-1;
+    let safety=0;
+    while(cy>ey&&safety++<3000){
+        const hlen=3+randInt(rng,0,5);
+        for(let i=0;i<hlen;i++){
+            let nx=cx+dir;
+            if(nx<0||nx>=W){dir=-dir;nx=cx+dir;}
+            if(nx<0||nx>=W)break;
+            cx=nx;addXY(cx,cy);
+        }
+        const dlen=1+randInt(rng,0,1);
+        for(let i=0;i<dlen&&cy>ey;i++){cy--;addXY(cx,cy);}
+        if(rng()<0.5)dir=-dir;
+    }
+    let guard=0;
+    let targetX=ex;
+    if(ex===0)targetX=1;
+    else if(ex===W-1)targetX=W-2;
+    else targetX=(rng()<0.5)?ex-1:ex+1;
+    while(cx!==targetX&&guard++<300){cx+=targetX>cx?1:-1;addXY(cx,cy);}
+    guard=0;
+    while(cy!==ey&&guard++<300){cy+=ey>cy?1:-1;addXY(cx,cy);}
+    if(cx!==ex){
+        const lastX=cx;cx=ex;
+        let step=cx>lastX?1:-1;
+        for(let x=lastX+step;;x+=step){
+            if(x===ex){addXY(x,ey,true);break;}
+            addXY(x,ey);
+        }
+    }else addXY(ex,ey,true);
+
+    // ---- 分配模式与 z ----
+    const segLen=Math.max(1,Math.ceil(xyPath.length/segCount));
+    const path=[];
+    let curZ=sz;
+    for(let i=0;i<xyPath.length;i++){
+        const ci=xyPath[i];
+        const segIdx=Math.min(segCount-1,Math.floor(i/segLen));
+        const mode=filteredAvail[segIdx%filteredAvail.length];
+        if(mode==='hilly'&&i>2&&i<xyPath.length-2&&H>2){
+            if(rng()<cfg.hillyChance/100){
+                const dz=rng()<0.5?1:-1;
+                const nz=curZ+dz;
+                if(nz>=1&&nz<=H-1)curZ=nz;
+            }
+        }
+        path.push({x:ci.x,y:ci.y,z:curZ,mode});
+    }
+    if(path.length>=3){
+        const transLen=Math.min(6,path.length-1);
+        const startIdx=path.length-transLen;
+        const startZ=path[startIdx].z;
+        for(let i=1;i<=transLen;i++){
+            const t=i/transLen;
+            path[startIdx+i-1].z=Math.round(startZ+(ez-startZ)*t);
+        }
+        path[path.length-1].z=ez;
+    }
+    if(path.length>0)path[0].z=sz;
+    for(let i=1;i<path.length;i++){
+        const dz=path[i].z-path[i-1].z;
+        if(Math.abs(dz)>1)path[i].z=path[i-1].z+(dz>0?1:-1);
+    }
+
+    // ---- 分叉路 ----
+    const branchCells=[];
+    if(cfg.branches&&path.length>8){
+        const mainSet=new Set(path.map(c=>c.x+','+c.y));
+        const nBranches=2+randInt(rng,0,3);
+        const usedBranchKeys=new Set();
+        for(let b=0;b<nBranches;b++){
+            const iStart=2+randInt(rng,0,Math.max(1,path.length-8));
+            const segB=3+randInt(rng,0,4);
+            const iEnd=Math.min(path.length-2,iStart+segB);
+            if(iEnd-iStart<3)continue;
+            const A=path[iStart],B=path[iEnd];
+            const dx=B.x-A.x,dy=B.y-A.y;
+            let px=-dy,py=dx;
+            const plen=Math.sqrt(px*px+py*py)||1;
+            px/=plen;py/=plen;
+            const side=rng()<0.5?1:-1;
+            const offset=2+randInt(rng,0,3);
+            const mx=Math.round((A.x+B.x)/2+px*offset*side);
+            const my=Math.round((A.y+B.y)/2+py*offset*side);
+            if(mx<0||mx>=W||my<0||my>=L)continue;
+
+            const branch=[];
+            let bx=A.x,by=A.y;
+            const totalSteps=Math.abs(mx-A.x)+Math.abs(my-A.y)+Math.abs(B.x-mx)+Math.abs(B.y-my);
+            let curStep=0;
+
+            let g1=0;
+            while(bx!==mx&&g1++<50){
+                bx+=mx>bx?1:-1;curStep++;
+                const tz=totalSteps>0?A.z+Math.round((B.z-A.z)*(curStep/totalSteps)):A.z;
+                branch.push({x:bx,y:by,z:tz,mode:A.mode});
+            }
+            g1=0;
+            while(by!==my&&g1++<50){
+                by+=my>by?1:-1;curStep++;
+                const tz=totalSteps>0?A.z+Math.round((B.z-A.z)*(curStep/totalSteps)):A.z;
+                branch.push({x:bx,y:by,z:tz,mode:A.mode});
+            }
+            g1=0;
+            while(bx!==B.x&&g1++<50){
+                bx+=B.x>bx?1:-1;curStep++;
+                const tz=totalSteps>0?A.z+Math.round((B.z-A.z)*(curStep/totalSteps)):A.z;
+                branch.push({x:bx,y:by,z:tz,mode:B.mode});
+            }
+            g1=0;
+            while(by!==B.y&&g1++<50){
+                by+=B.y>by?1:-1;curStep++;
+                const tz=totalSteps>0?A.z+Math.round((B.z-A.z)*(curStep/totalSteps)):A.z;
+                branch.push({x:bx,y:by,z:tz,mode:B.mode});
+            }
+
+            for(const c of branch){
+                if(c.x<0||c.x>=W||c.y<0||c.y>=L)continue;
+                const k=c.x+','+c.y;
+                if(mainSet.has(k))continue;
+                if(usedBranchKeys.has(k))continue;
+                usedBranchKeys.add(k);
+                branchCells.push({...c,isBranch:true});
+            }
+        }
+    }
+
+    const allCells=path.concat(branchCells);
+    const cellSet=new Set(allCells.map(c=>c.x+','+c.y));
+    const branchSet=new Set(branchCells.map(c=>c.x+','+c.y));
+
+    // ---- 类型分配 ----
+    const typeMap=new Map();
+    // 限制起点与终点周围 2 格区域均强制为 static，防止跳跃不可达
+    const protectedSet=new Set();
+    for(const p of path){
+        if(Math.abs(p.x-sx)+Math.abs(p.y-sy)<=2 || Math.abs(p.x-ex)+Math.abs(p.y-ey)<=2){
+            protectedSet.add(p.x+','+p.y);
+        }
+    }
+
+    let i=0;
+    while(i<allCells.length){
+        const key=allCells[i].x+','+allCells[i].y;
+        if(protectedSet.has(key)){typeMap.set(key,'static');i++;continue;}
+        const r=rng()*100;
+        let type,len;
+        if(r<cfg.moveP){type='move';len=2+randInt(rng,0,2);}
+        else if(r<cfg.moveP+cfg.fallP){type='fall';len=1;}
+        else{type='static';len=Math.max(2,cfg.staticLen-2)+randInt(rng,0,4);}
+        for(let k=0;k<len&&i<allCells.length;k++,i++){
+            const kk=allCells[i].x+','+allCells[i].y;
+            typeMap.set(kk,protectedSet.has(kk)?'static':type);
+        }
+    }
+
+    // ---- 实体生成 ----
+    const statics=[],movings=[],falls=[],bumpers=[],prisms=[],checkpoints=[],cameras=[];
+    i=0;
+    while(i<allCells.length){
+        const t=typeMap.get(allCells[i].x+','+allCells[i].y);
+        if(t==='static'){
+            let j=i;
+            while(j<allCells.length&&typeMap.get(allCells[j].x+','+allCells[j].y)==='static')j++;
+            for(let k=i;k<j;k++){const c=allCells[k];statics.push({x:c.x,y:c.y,z:c.z-1});}
+            i=j;
+        }else if(t==='fall'){
+            falls.push({x:allCells[i].x,y:allCells[i].y,z:allCells[i].z});i++;
+        }else if(t==='move'){
+            const seg=[];
+            while(i<allCells.length&&typeMap.get(allCells[i].x+','+allCells[i].y)==='move'){seg.push(allCells[i]);i++;}
+            if(seg.length>=2)movings.push(makeMovingPlatform(seg,rng));
+            else if(seg.length===1)statics.push({x:seg[0].x,y:seg[0].y,z:seg[0].z-1});
+        }else i++;
+    }
+
+    // 平台模式
+    let platformCells=new Set();
+    let platformCenters=[];
+    if(cfg.modePlatform&&cfg.platformDensity>0){
+        platformCenters=selectPlatformCenters(path,cfg.platformDensity,rng);
+        for(const c of platformCenters){
+            const hw=Math.floor(c.pw/2);
+            const hh=Math.floor(c.ph/2);
+            for(let dx=-hw;dx<=hw;dx++){
+                for(let dy=-hh;dy<=hh;dy++){
+                    const px=c.x+dx,py=c.y+dy;
+                    if(px<0||px>=W||py<0||py>=L)continue;
+                    statics.push({x:px,y:py,z:c.z-1});
+                    platformCells.add(px+','+py);
+                }
+            }
+        }
+    }
+
+    // 平坦铺底
+    if(cfg.modeFlat&&!cfg.mixModes&&!cfg.modePlatform){
+        for(let x=0;x<W;x++)for(let y=0;y<L;y++){
+            const t=typeMap.get(x+','+y);
+            if(t==='move'||t==='fall')continue;
+            statics.push({x,y,z:0});
+        }
+    }
+
+    // 迷宫墙
+    const mazeModeSet=new Set(['maze','tallMaze','blindMaze']);
+    const wallCellsAll=[];
+    if(cfg.modeMaze||cfg.modeTallMaze||cfg.modeBlindMaze){
+        for(const c of path){
+            if(!mazeModeSet.has(c.mode))continue;
+            const mazeCfg=computeMazeLayers(c.mode,c.z,H);
+            if(!mazeCfg)continue;
+            for(const[dx,dy]of[[0,1],[0,-1],[1,0],[-1,0]]){
+                for(let depth=1;depth<=2;depth++){
+                    const nx=c.x+dx*depth,ny=c.y+dy*depth;
+                    if(nx<0||nx>=W||ny<0||ny>=L)continue;
+                    for(let zz=mazeCfg.wallMinZ;zz<=mazeCfg.wallMaxZ;zz++){
+                        if(wallCellsAll.some(w=>w.x===nx&&w.y===ny&&w.z===zz))continue;
+                        if(cellSet.has(nx+','+ny))continue;
+                        if(platformCells.has(nx+','+ny))continue;
+                        wallCellsAll.push({x:nx,y:ny,z:zz});
+                    }
+                }
+            }
+        }
+    }
+    for(const w of wallCellsAll)statics.push(w);
+
+    // 盲迷宫盖子
+    if(cfg.modeBlindMaze){
+        const seen=new Set();
+        for(const c of path){
+            if(c.mode!=='blindMaze')continue;
+            const mazeCfg=computeMazeLayers(c.mode,c.z,H);
+            if(!mazeCfg||mazeCfg.lidZ<0)continue;
+            const k1=c.x+','+c.y+','+mazeCfg.lidZ;
+            if(!seen.has(k1)){seen.add(k1);statics.push({x:c.x,y:c.y,z:mazeCfg.lidZ});}
+        }
+        for(const w of wallCellsAll){
+            const owner=path.find(c=>Math.abs(c.x-w.x)<=2&&Math.abs(c.y-w.y)<=2&&c.mode==='blindMaze');
+            if(!owner)continue;
+            const mazeCfg=computeMazeLayers(owner.mode,owner.z,H);
+            if(!mazeCfg||mazeCfg.lidZ<0)continue;
+            const k2=w.x+','+w.y+','+mazeCfg.lidZ;
+            if(!seen.has(k2)){seen.add(k2);statics.push({x:w.x,y:w.y,z:mazeCfg.lidZ});}
+        }
+    }
+
+    // 按钮谜题
+    let buttonPuzzle=null;
+    if(cfg.buttonPuzzle&&H>=3&&path.length>=16){
+        const btns=[];
+        const usedKeys=new Set();
+        const nBtns=Math.max(2,Math.min(5,cfg.btnCount));
+        for(let k=0;k<nBtns;k++){
+            let tries=0;
+            while(tries++<40){
+                const idx=randInt(rng,Math.floor(path.length*0.2),Math.floor(path.length*0.8));
+                const c=path[idx];
+                const key=c.x+','+c.y;
+                if(usedKeys.has(key))continue;
+                let tooClose=false;
+                for(const b of btns){
+                    if(Math.abs(b.x-c.x)+Math.abs(b.y-c.y)<3){tooClose=true;break;}
+                }
+                if(tooClose)continue;
+                usedKeys.add(key);
+                btns.push({x:c.x,y:c.y,z:c.z});
+                break;
+            }
+        }
+        const pIdx1=Math.floor(path.length*0.3);
+        const pIdx2=Math.floor(path.length*0.7);
+        const plat1={x:path[pIdx1].x,y:path[pIdx1].y,z:path[pIdx1].z};
+        const plat2={x:path[pIdx2].x,y:path[pIdx2].y,z:path[pIdx2].z};
+        const plat1OK=plat1.z+1<=H-1&&plat1.z>=1;
+        const plat2OK=plat2.z+1<=H-1&&plat2.z>=1;
+        if(btns.length>=2&&plat1OK&&plat2OK){
+            const seqVal=cfg.btnSeq==='random'?(rng()<0.5):(cfg.btnSeq==='true');
+            buttonPuzzle={plat1,plat2,btns,sequenceInOrder:seqVal};
+        }
+    }
+    if(buttonPuzzle){
+        const skipKeys=new Set([
+            buttonPuzzle.plat1.x+','+buttonPuzzle.plat1.y+','+(buttonPuzzle.plat1.z-1),
+            buttonPuzzle.plat2.x+','+buttonPuzzle.plat2.y+','+(buttonPuzzle.plat2.z-1)
+        ]);
+        skipKeys.delete(sx+','+sy+','+(sz-1));
+        skipKeys.delete(ex+','+ey+','+(ez-1));
+
+        for(let k=statics.length-1;k>=0;k--){
+            const key=statics[k].x+','+statics[k].y+','+statics[k].z;
+            if(skipKeys.has(key))statics.splice(k,1);
+        }
+    }
+
+    // 存档点
+    const cpInt=Math.max(3,cfg.cpInt);
+    const usedCp=new Set();
+    for(let k=0;k<path.length;k+=cpInt){
+        const c=path[k];const key=c.x+','+c.y;
+        if(usedCp.has(key))continue;
+        usedCp.add(key);
+        checkpoints.push({x:c.x,y:c.y,z:c.z});
+    }
+    if(!usedCp.has(ex+','+ey))checkpoints.push({x:ex,y:ey,z:ez});
+
+    // 候选空格
+    const candSet=new Set();
+    const candList=[];
+    for(const c of path){
+        for(const[dx,dy]of[[0,1],[0,-1],[1,0],[-1,0]]){
+            const nx=c.x+dx,ny=c.y+dy;
+            if(nx<0||nx>=W||ny<0||ny>=L)continue;
+            const k=nx+','+ny;
+            if(cellSet.has(k))continue;
+            if(candSet.has(k))continue;
+            candSet.add(k);
+            candList.push({x:nx,y:ny,z:c.z});
+        }
+    }
+    shuffle(candList,rng);
+
+    // 撞击器
+    if(cfg.bumpers){
+        const dirs=['North','East','South','West'];
+        if(cfg.bumpersAsDeco){
+            const n=Math.max(2,Math.floor(path.length*0.04));
+            for(let k=0;k<n;k++){
+                if(path.length===0)break;
+                const c=path[randInt(rng,0,path.length-1)];
+                bumpers.push({x:c.x,y:c.y,z:c.z,dir:dirs[randInt(rng,0,3)],decorative:true});
+            }
+        }else{
+            if(candList.length>0){
+                const n=Math.max(1,Math.floor(candList.length*0.05));
+                for(let k=0;k<n&&k<candList.length;k++){
+                    const cand=candList[k];
+                    const dir=getBumperDirection(cand.x,cand.y,path);
+                    bumpers.push({x:cand.x,y:cand.y,z:cand.z,dir,decorative:false});
+                }
+            }
+        }
+    }
+
+    // 棱柱
+    if(cfg.prisms){
+        const nonMazeCands=candList.filter(cand=>{
+            let nearest=null,nd=Infinity;
+            for(const p of path){
+                const d=Math.abs(p.x-cand.x)+Math.abs(p.y-cand.y);
+                if(d<nd){nd=d;nearest=p;}
+            }
+            if(!nearest)return true;
+            return !mazeModeSet.has(nearest.mode);
+        });
+        const n=3+randInt(rng,0,3);
+        for(let k=0;k<n;k++){
+            if(rng()<0.7&&path.length>0){
+                const c=path[randInt(rng,0,path.length-1)];
+                prisms.push({x:c.x,y:c.y,z:c.z});
+            }else if(nonMazeCands.length>0){
+                const c=nonMazeCands[randInt(rng,0,nonMazeCands.length-1)];
+                prisms.push({x:c.x,y:c.y,z:c.z});
+            }else if(path.length>0){
+                const c=path[randInt(rng,0,path.length-1)];
+                prisms.push({x:c.x,y:c.y,z:c.z});
+            }
+        }
+    }
+
+    // 装饰
+    if(cfg.decorations&&cfg.decoCount>0){
+        const placed=new Set();
+        const allShapes=['island','pillar','checker','square','circle','letter'];
+        let attempts=0,placedCount=0;
+        while(placedCount<cfg.decoCount&&attempts<cfg.decoCount*5&&candList.length>0){
+            attempts++;
+            const cand=candList[randInt(rng,0,candList.length-1)];
+            const shape=cfg.decoShape==='mixed'?allShapes[randInt(rng,0,allShapes.length-1)]:cfg.decoShape;
+            const cells=makeDecoration(shape,cand.x,cand.y,rng);
+            let ok=true;
+            for(const cc of cells){
+                if(cc.x<0||cc.x>=W||cc.y<0||cc.y>=L){ok=false;break;}
+                if(cellSet.has(cc.x+','+cc.y)){ok=false;break;}
+                if(placed.has(cc.x+','+cc.y)){ok=false;break;}
+            }
+            if(!ok)continue;
+            for(const cc of cells){placed.add(cc.x+','+cc.y);statics.push({x:cc.x,y:cc.y,z:cc.z});}
+            placedCount++;
+        }
+    }
+
+    // 相机
+    if(cfg.cameras){
+        cameras.push({x:sx,y:sy,z:sz,zoom:1});
+        cameras.push({x:ex,y:ey,z:ez,zoom:1});
+    }
+
+    // 防卡死强化：强制补全起点与终点基础支撑平台
+    for(let dx=-1;dx<=1;dx++){
+        for(let dy=-1;dy<=1;dy++){
+            const px1=sx+dx, py1=sy+dy;
+            if(px1>=0&&px1<W&&py1>=0&&py1<L) statics.push({x:px1,y:py1,z:sz-1});
+            const px2=ex+dx, py2=ey+dy;
+            if(px2>=0&&px2<W&&py2>=0&&py2<L) statics.push({x:px2,y:py2,z:ez-1});
+        }
+    }
+
+    // 去重与界限保护
+    const staticSet=new Set();
+    const finalStatics=[];
+    for(const s of statics){
+        if(s.z<0||s.z>=H)continue;
+        const k=s.x+','+s.y+','+s.z;
+        if(staticSet.has(k))continue;
+        staticSet.add(k);
+        finalStatics.push(s);
+    }
+
+    let mj=cfg.musicJava==='random'?randInt(rng,0,11):cfg.musicJava;
+    let m=cfg.music==='random'?randInt(rng,0,24):cfg.music;
+
+    return{
+        W,L,H,sx,sy,sz,ex,ey,ez,
+        path,allCells,cellSet,typeMap,
+        branchSet,wallCells:wallCellsAll,
+        statics:finalStatics,
+        movings,falls,bumpers,prisms,checkpoints,cameras,
+        buttonPuzzle,
+        platformCells:Array.from(platformCells).map(k=>{const[x,y]=k.split(',').map(Number);return{x,y};}),
+        platformCenters,
+        segModes:filteredAvail,segCount,
+        musicJava:mj,music:m,
+        seed:cfg.seed
+    };
+}
+
+// ==================== XML 构建 ====================
+function buildXML(level,cfg){
+    const{W,L,H,sx,sy,sz,ex,ey,ez}=level;
+    const pathLen=level.path.length;
+    const baseTime=pathLen*0.35;
+    let t=[Math.round(baseTime*0.70),Math.round(baseTime*0.85),Math.round(baseTime*1.00),Math.round(baseTime*1.20),Math.round(baseTime*1.50)];
+    for(let i=1;i<5;i++)if(t[i]<=t[i-1])t[i]=t[i-1]+1;
+    if(t[0]<5)t=[5,8,12,18,25];
+
+    const now=new Date();
+    const ts=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0')+' '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
+    const staticsAtZ0=level.statics.filter(s=>s.z===0).length;
+    const modeStr=level.segModes.join('+')+(cfg.mixModes&&level.segCount>1?` (${level.segCount}段)`:'');
+
+    const decoBumpers=level.bumpers.filter(b=>b.decorative);
+    const obstacleBumpers=level.bumpers.filter(b=>!b.decorative);
+
+    let xml='';
+    xml+=`<!--\n`;
+    xml+=`  EDGE Level Generator v7.2 Pro (auto-generated)\n`;
+    xml+=`  Generated at : ${ts}\n`;
+    xml+=`  Seed         : ${cfg.seed}\n`;
+    xml+=`  Size         : ${W}x${L}x${H}\n`;
+    xml+=`  SpawnPoint   : ${sx},${sy},${sz}\n`;
+    xml+=`  ExitPoint    : ${ex},${ey},${ez}\n`;
+    xml+=`  Path length  : ${pathLen} cells\n`;
+    xml+=`  Path modes   : ${modeStr}\n`;
+    xml+=`  PlatformMode : ${cfg.modePlatform?('yes, density='+cfg.platformDensity+'%, centers='+level.platformCenters.length):'no'}\n`;
+    xml+=`  Static total : ${level.statics.length} (z=0: ${staticsAtZ0})\n`;
+    xml+=`  Maze walls   : ${level.wallCells.length}\n`;
+    xml+=`  Branches     : ${level.branchSet.size>0?('yes, '+level.branchSet.size+' cells'):'no'}\n`;
+    xml+=`  MovingPlat.  : ${level.movings.length}\n`;
+    xml+=`  FallingPlat. : ${level.falls.length}\n`;
+    xml+=`  Bumpers      : ${obstacleBumpers.length} (obstacle)\n`;
+    xml+=`  BumperDeco   : ${decoBumpers.length} (decoration)\n`;
+    xml+=`  Prisms       : ${level.prisms.length}\n`;
+    xml+=`  Checkpoints  : ${level.checkpoints.length}\n`;
+    xml+=`  Cameras      : ${level.cameras.length}\n`;
+    xml+=`  ButtonPuzzle : ${level.buttonPuzzle?'yes ('+level.buttonPuzzle.btns.length+' buttons)':'no'}\n`;
+    xml+=`  MusicJava    : ${level.musicJava} (${MUSIC_JAVA_NAMES[level.musicJava]||'?'})\n`;
+    xml+=`  Music        : ${level.music} (${MUSIC_NAMES[level.music]||'?'})\n`;
+    xml+=`  Config       : staticLen=${cfg.staticLen} moveP=${cfg.moveP}% fallP=${cfg.fallP}%\n`;
+    xml+=`                 cpInt=${cfg.cpInt} hilly=${cfg.hillyChance}% deco=${cfg.decoShape}×${cfg.decoCount}\n`;
+    xml+=`-->\n`;
+
+    xml+=`<Level ID="${cfg.id}" Name="${escapeXML(cfg.name)}" TimeThresholds="${t.join(',')}"\n`;
+    xml+=`       Size="${W}x${L}x${H}" SpawnPoint="${sx},${sy},${sz}" ExitPoint="${ex},${ey},${ez}"\n`;
+    xml+=`       MusicJava="${level.musicJava}" Music="${level.music}" Zoom="1">\n`;
+
+    if(level.buttonPuzzle){
+        const bp=level.buttonPuzzle;
+        xml+='\n  <!-- 按钮谜题平台 -->\n';
+        xml+=`  <MovingPlatform ID="BtnMP1" AutoStart="False" LoopStartIndex="0">\n`;
+        xml+=`    <Waypoint Position="${bp.plat1.x},${bp.plat1.y},${bp.plat1.z+1}" />\n`;
+        xml+=`    <Waypoint Position="${bp.plat1.x},${bp.plat1.y},${bp.plat1.z-1}" TravelTime="50" />\n`;
+        xml+=`  </MovingPlatform>\n`;
+        xml+=`  <MovingPlatform ID="BtnMP2" AutoStart="False" LoopStartIndex="0">\n`;
+        xml+=`    <Waypoint Position="${bp.plat2.x},${bp.plat2.y},${bp.plat2.z+1}" />\n`;
+        xml+=`    <Waypoint Position="${bp.plat2.x},${bp.plat2.y},${bp.plat2.z-1}" TravelTime="50" />\n`;
+        xml+=`  </MovingPlatform>\n`;
+    }
+
+    if(level.movings.length>0){
+        xml+='\n  <!-- 常规移动平台 -->\n';
+        level.movings.forEach((mp,idx)=>{
+            xml+=`  <MovingPlatform ID="MP${idx+1}" AutoStart="True" LoopStartIndex="1">\n`;
+            for(const wp of mp.waypoints)xml+=`    <Waypoint Position="${wp.x},${wp.y},${wp.z}" TravelTime="${wp.travel}" PauseTime="${wp.pause}" />\n`;
+            xml+=`  </MovingPlatform>\n`;
+        });
+    }
+
+    if(level.falls.length>0){
+        xml+='\n  <!-- 掉落平台 -->\n';
+        for(const fp of level.falls)xml+=`  <FallingPlatform Position="${fp.x},${fp.y},${fp.z}" FloatTime="15" />\n`;
+    }
+
+    if(obstacleBumpers.length>0){
+        xml+='\n  <!-- 撞击器（障碍模式） -->\n';
+        for(const b of obstacleBumpers){
+            xml+=`  <Bumper Position="${b.x},${b.y},${b.z}">\n`;
+            xml+=`    <${b.dir} PulseRate="30" />\n`;
+            xml+=`  </Bumper>\n`;
+        }
+    }
+    if(decoBumpers.length>0){
+        xml+='\n  <!-- 撞击器（装饰模式） -->\n';
+        for(const b of decoBumpers){
+            xml+=`  <Bumper Position="${b.x},${b.y},${b.z}">\n`;
+            xml+=`    <${b.dir} PulseRate="30" />\n`;
+            xml+=`  </Bumper>\n`;
+        }
+    }
+
+    if(level.checkpoints.length>0){
+        xml+='\n  <!-- 存档点 -->\n';
+        for(const cp of level.checkpoints)xml+=`  <Checkpoint Position="${cp.x},${cp.y},${cp.z}" RespawnZ="${cp.z}" Radius="1,1" />\n`;
+    }
+    if(level.cameras.length>0){
+        xml+='\n  <!-- 相机触发器 -->\n';
+        for(const ct of level.cameras)xml+=`  <CameraTrigger Position="${ct.x},${ct.y},${ct.z}" Zoom="${ct.zoom}" />\n`;
+    }
+    if(level.prisms.length>0){
+        xml+='\n  <!-- 棱柱 -->\n';
+        for(const p of level.prisms)xml+=`  <Prism Position="${p.x},${p.y},${p.z}" />\n`;
+    }
+
+    if(level.buttonPuzzle){
+        const bp=level.buttonPuzzle;
+        const seqVal=bp.sequenceInOrder?'True':'False';
+        xml+='\n  <!-- 按钮序列 -->\n';
+        xml+=`  <ButtonSequence SequenceInOrder="${seqVal}"\n`;
+        xml+=`                  AffectMovingPlatforms="BtnMP1 (1),BtnMP2 (1)">\n`;
+        for(let i=0;i<bp.btns.length;i++){
+            const b=bp.btns[i];
+            xml+=`    <Button ID="PuzzleBtn${i+1}" Position="${b.x},${b.y},${b.z}" />\n`;
+        }
+        xml+=`  </ButtonSequence>\n`;
+    }
+
+    xml+=`</Level>\n`;
+    return xml;
+}
+
+function buildBlockTable(level){
+    const sorted=[...level.statics].sort((a,b)=>a.z-b.z||a.y-b.y||a.x-b.x);
+    let out='',lastZ=-1;
+    for(const b of sorted){
+        if(b.z!==lastZ){
+            if(lastZ!==-1)out+='\n';
+            out+=`<!-- 层 z=${b.z} -->\n`;
+            lastZ=b.z;
+        }
+        out+=`sblock(${b.x},${b.y},${b.z})\n`;
+    }
+    return out.trim();
+}
+
+// ==================== 绘制预览 ====================
+function drawPreview(level){
+    const canvas=document.getElementById('preview');
+    const ctx=canvas.getContext('2d');
+    const{W,L,sx,sy,ex,ey}=level;
+    const CELL=Math.max(6,Math.min(22,Math.floor(560/Math.max(W,L))));
+    canvas.width=W*CELL;canvas.height=L*CELL;
+
+    ctx.fillStyle='#0a0e16';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.strokeStyle='#1a2030';ctx.lineWidth=1;
+    for(let x=0;x<=W;x++){ctx.beginPath();ctx.moveTo(x*CELL+0.5,0);ctx.lineTo(x*CELL+0.5,canvas.height);ctx.stroke();}
+    for(let y=0;y<=L;y++){ctx.beginPath();ctx.moveTo(0,y*CELL+0.5);ctx.lineTo(canvas.width,y*CELL+0.5);ctx.stroke();}
+    const pad=Math.max(1,Math.floor(CELL*0.1));
+
+    const staticXY=new Set();
+    for(const s of level.statics)if(s.z===0)staticXY.add(s.x+','+s.y);
+    for(const k of staticXY){
+        const[x,y]=k.split(',').map(Number);
+        ctx.fillStyle='#4d3a1a';
+        ctx.fillRect(x*CELL+pad,y*CELL+pad,CELL-pad*2,CELL-pad*2);
+    }
+
+    for(const c of level.path){
+        const t=level.typeMap.get(c.x+','+c.y);
+        let color;
+        if(t==='static')color='#facc15';
+        else if(t==='move')color='#60a5fa';
+        else if(t==='fall')color='#fb923c';
+        else color='#64748b';
+        ctx.fillStyle=color;
+        ctx.fillRect(c.x*CELL+pad,c.y*CELL+pad,CELL-pad*2,CELL-pad*2);
+    }
+
+    if(level.platformCells&&level.platformCells.length>0){
+        for(const p of level.platformCells){
+            ctx.fillStyle='#ff8c00';
+            ctx.fillRect(p.x*CELL+pad,p.y*CELL+pad,CELL-pad*2,CELL-pad*2);
+        }
+        for(const c of level.platformCenters||[]){
+            const hw=Math.floor(c.pw/2);
+            const hh=Math.floor(c.ph/2);
+            const minX=Math.max(0,c.x-hw);
+            const minY=Math.max(0,c.y-hh);
+            const maxX=Math.min(W-1,c.x+hw);
+            const maxY=Math.min(L-1,c.y+hh);
+            ctx.strokeStyle='#ffb84d';
+            ctx.lineWidth=Math.max(1.5,CELL*0.12);
+            ctx.strokeRect(minX*CELL+pad,minY*CELL+pad,(maxX-minX+1)*CELL-pad*2,(maxY-minY+1)*CELL-pad*2);
+        }
+    }
+
+    if(level.branchSet&&level.branchSet.size>0){
+        for(const c of level.allCells){
+            if(!level.branchSet.has(c.x+','+c.y))continue;
+            ctx.fillStyle='#86e0a5';
+            ctx.fillRect(c.x*CELL+pad,c.y*CELL+pad,CELL-pad*2,CELL-pad*2);
+            ctx.strokeStyle='#4ade80';
+            ctx.lineWidth=1;
+            ctx.strokeRect(c.x*CELL+pad+0.5,c.y*CELL+pad+0.5,CELL-pad*2-1,CELL-pad*2-1);
+        }
+    }
+
+    if(level.buttonPuzzle){
+        const bp=level.buttonPuzzle;
+        for(const p of[bp.plat1,bp.plat2]){
+            ctx.strokeStyle='#38bdf8';
+            ctx.lineWidth=Math.max(2,CELL*0.15);
+            ctx.setLineDash([3,3]);
+            ctx.strokeRect(p.x*CELL+pad,p.y*CELL+pad,CELL-pad*2,CELL-pad*2);
+            ctx.setLineDash([]);
+        }
+        for(const b of bp.btns){
+            ctx.fillStyle='#fde68a';
+            const size=Math.max(4,CELL*0.4);
+            ctx.fillRect(b.x*CELL+(CELL-size)/2,b.y*CELL+(CELL-size)/2,size,size);
+        }
+    }
+
+    for(const s of level.statics){
+        if(s.z===0)continue;
+        if(level.platformCells&&level.platformCells.some(p=>p.x===s.x&&p.y===s.y))continue;
+        ctx.strokeStyle='#64748b';ctx.lineWidth=1;
+        ctx.strokeRect(s.x*CELL+pad,s.y*CELL+pad,CELL-pad*2,CELL-pad*2);
+    }
+
+    for(const cp of level.checkpoints){
+        ctx.fillStyle='#f472b6';
+        const size=Math.max(3,CELL*0.35);
+        ctx.fillRect(cp.x*CELL+(CELL-size)/2,cp.y*CELL+(CELL-size)/2,size,size);
+    }
+
+    for(const b of level.bumpers){
+        const isDeco=!!b.decorative;
+        ctx.strokeStyle=isDeco?'#c4b5fd':'#a78bfa';
+        ctx.lineWidth=Math.max(1,CELL*0.12);
+        const cxp=b.x*CELL+CELL/2,cyp=b.y*CELL+CELL/2,r=CELL*0.28;
+        let dx=0,dy=0;
+        if(b.dir==='East')dx=1;else if(b.dir==='West')dx=-1;
+        else if(b.dir==='South')dy=1;else if(b.dir==='North')dy=-1;
+        ctx.beginPath();ctx.moveTo(cxp-dx*r,cyp-dy*r);ctx.lineTo(cxp+dx*r,cyp+dy*r);ctx.stroke();
+        const hx=cxp+dx*r,hy=cyp+dy*r,hw=r*0.45;
+        ctx.beginPath();ctx.moveTo(hx,hy);
+        ctx.lineTo(hx-dx*hw-dy*hw,hy-dy*hw-dx*hw);
+        ctx.lineTo(hx-dx*hw+dy*hw,hy-dy*hw+dx*hw);
+        ctx.closePath();ctx.fillStyle=isDeco?'#c4b5fd':'#a78bfa';ctx.fill();
+        if(isDeco){
+            ctx.strokeStyle='#e9d5ff';ctx.lineWidth=1;
+            ctx.beginPath();ctx.arc(cxp,cyp,r*0.4,0,Math.PI*2);ctx.stroke();
+        }
+    }
+
+    for(const p of level.prisms){
+        ctx.fillStyle='#22d3ee';
+        ctx.beginPath();ctx.arc(p.x*CELL+CELL/2,p.y*CELL+CELL/2,Math.max(2,CELL*0.18),0,Math.PI*2);ctx.fill();
+    }
+
+    ctx.fillStyle='#4ade80';
+    ctx.fillRect(sx*CELL+pad,sy*CELL+pad,CELL-pad*2,CELL-pad*2);
+    ctx.fillStyle='#0a0e16';
+    ctx.font=`bold ${Math.max(8,CELL*0.55)}px sans-serif`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('S',sx*CELL+CELL/2,sy*CELL+CELL/2+1);
+
+    ctx.fillStyle='#f87171';
+    ctx.fillRect(ex*CELL+pad,ey*CELL+pad,CELL-pad*2,CELL-pad*2);
+    ctx.fillStyle='#0a0e16';
+    ctx.fillText('E',ex*CELL+CELL/2,ey*CELL+CELL/2+1);
+}
+
+function renderPngGrid(layers,targetEl){
+    const grid=targetEl||document.getElementById('pngGrid');
+    grid.innerHTML='';
+    if(!layers||layers.length===0){grid.innerHTML='<div class="ph" style="grid-column:1/-1;">暂无图层</div>';return;}
+    const frag=document.createDocumentFragment();
+    for(const layer of layers){
+        const div=document.createElement('div');
+        div.className='png-layer';
+        const head=document.createElement('div');
+        head.className='head';
+        const zS=document.createElement('span');zS.className='zlabel';zS.textContent='z = '+layer.z;
+        const cS=document.createElement('span');cS.textContent=layer.count+' 方块';
+        head.appendChild(zS);head.appendChild(cS);
+        div.appendChild(head);
+        const disp=document.createElement('canvas');
+        disp.width=layer.canvas.width;disp.height=layer.canvas.height;
+        disp.getContext('2d').drawImage(layer.canvas,0,0);
+        div.appendChild(disp);
+        frag.appendChild(div);
+    }
+    grid.appendChild(frag);
+}
+
+// ==================== 事件绑与初始化 ====================
+let lastLevel=null,lastXml='',lastSblock='',lastPngLayers=[];
+let lastFileBase='level';
+
+function readConfig(){
+    const seedStr=document.getElementById('cfgSeed').value.trim();
+    const seed=seedStr===''?(Math.random()*0xFFFFFFFF)>>>0:hashString(seedStr);
+    const W=Math.max(1,Math.min(10000,parseInt(document.getElementById('cfgW').value)||24));
+    const L=Math.max(1,Math.min(10000,parseInt(document.getElementById('cfgL').value)||30));
+    const H=Math.max(1,Math.min(10000,parseInt(document.getElementById('cfgH').value)||3));
+
+    let id=document.getElementById('cfgId').value.trim();
+    if(!id)id=String(100000+Math.floor(Math.random()*900000));
+
+    let name=document.getElementById('cfgName').value.trim();
+    if(!name){
+        const ADJ=['Silent','Frozen','Crimson','Azure','Golden','Shadow','Crystal','Iron','Echo','Neon','Drift','Hollow'];
+        const NOUN=['Garden','Path','Maze','Voyage','Circuit','Prism','Cascade','Labyrinth','Spire','Horizon','Rift','Shard'];
+        name=ADJ[randInt(Math.random,0,ADJ.length-1)]+' '+NOUN[randInt(Math.random,0,NOUN.length-1)];
+    }
+
+    const spawn=parseXYZ(document.getElementById('cfgSpawn').value);
+    const exit=parseXYZ(document.getElementById('cfgExit').value);
+    const mjVal=document.getElementById('cfgMusicJava').value;
+    const mVal=document.getElementById('cfgMusic').value;
+
+    return{
+        seed,W,L,H,id,name,spawn,exit,
+        staticLen:Math.max(2,Math.min(20,parseInt(document.getElementById('cfgStaticLen').value)||6)),
+        moveP:Math.max(0,Math.min(80,parseInt(document.getElementById('cfgMoveP').value)||0)),
+        fallP:Math.max(0,Math.min(80,parseInt(document.getElementById('cfgFallP').value)||0)),
+        cpInt:Math.max(3,Math.min(40,parseInt(document.getElementById('cfgCpInt').value)||10)),
+        hillyChance:Math.max(0,Math.min(100,parseInt(document.getElementById('cfgHillyChance').value)||25)),
+        platformDensity:Math.max(0,Math.min(100,parseInt(document.getElementById('cfgPlatformDensity').value)||50)),
+        decoCount:Math.max(0,Math.min(40,parseInt(document.getElementById('cfgDecoCount').value)||0)),
+        decoShape:document.getElementById('cfgDecoShape').value,
+        musicJava:mjVal==='random'?'random':+mjVal,
+        music:mVal==='random'?'random':+mVal,
+        modeFlat:document.getElementById('modeFlat').checked,
+        modePlatform:document.getElementById('modePlatform').checked,
+        modeHilly:document.getElementById('modeHilly').checked,
+        modeMaze:document.getElementById('modeMaze').checked,
+        modeTallMaze:document.getElementById('modeTallMaze').checked,
+        modeBlindMaze:document.getElementById('modeBlindMaze').checked,
+        mixModes:document.getElementById('mixModes').checked,
+        branches:document.getElementById('cfgBranches').checked,
+        decorations:document.getElementById('cfgDecorations').checked,
+        bumpers:document.getElementById('cfgBumpers').checked,
+        bumpersAsDeco:document.getElementById('cfgBumpersAsDeco').checked,
+        prisms:document.getElementById('cfgPrisms').checked,
+        cameras:document.getElementById('cfgCameras').checked,
+        buttonPuzzle:document.getElementById('cfgButtonPuzzle').checked,
+        btnCount:Math.max(2,Math.min(5,parseInt(document.getElementById('cfgBtnCount').value)||2)),
+        btnSeq:document.getElementById('cfgBtnSeq').value
+    };
+}
+
+function doGenerate(){
+    try{
+        const cfg=readConfig();
+        const level=generateLevel(cfg);
+        if(level.path.length<8){showToast('路径太短，请增大尺寸或重试','error');return;}
+
+        lastLevel=level;
+        level.name=cfg.name;
+        lastXml=buildXML(level,cfg);
+        lastSblock=buildBlockTable(level);
+        lastPngLayers=buildPngLayersFromBlocks(level.W,level.L,level.H,level.statics);
+
+        const rand4=String(Math.floor(Math.random()*10000)).padStart(4,'0');
+        lastFileBase=sanitizeName(cfg.name)+'_'+rand4;
+
+        document.getElementById('outXml').textContent=lastXml;
+        document.getElementById('outSblock').textContent=lastSblock;
+        renderPngGrid(lastPngLayers);
+        drawPreview(level);
+        document.getElementById('zipBtn').disabled=false;
+
+        const modeNames=level.segModes.join('+')+(cfg.mixModes&&level.segCount>1?` (${level.segCount}段)`:'');
+        const platformInfo=cfg.modePlatform?` | 平台密度 ${cfg.platformDensity}%`:'';
+        const branchInfo=level.branchSet.size>0?` | 岔路 ${level.branchSet.size}格`:' | 岔路 —';
+
+        document.getElementById('stats').innerHTML=`
+            <span>🌱 种子 <b>${cfg.seed}</b></span>
+            <span>📐 <b>${cfg.W}×${cfg.L}×${cfg.H}</b></span>
+            <span>🚩 <b>${level.sx},${level.sy},${level.sz}</b></span>
+            <span>🏁 <b>${level.ex},${level.ey},${level.ez}</b></span>
+            <span>🛤️ 路径 <b>${level.path.length}</b></span>
+            <span>🎨 <b>${modeNames}${platformInfo}</b></span>
+            <span>⬛ 静态 <b>${level.statics.length}</b></span>
+            <span>🟠 平台中心 <b>${(level.platformCenters||[]).length}</b></span>
+            <span>🌿 岔路 <b>${level.branchSet.size}</b></span>
+            <span>🔵 移动 <b>${level.movings.length}</b></span>
+            <span>🟠 掉落 <b>${level.falls.length}</b></span>
+            <span>🟣 撞击器(障碍) <b>${level.bumpers.filter(b=>!b.decorative).length}</b></span>
+            <span>💜 撞击器(装饰) <b>${level.bumpers.filter(b=>b.decorative).length}</b></span>
+            <span>🔷 棱柱 <b>${level.prisms.length}</b></span>
+            <span>💗 存档点 <b>${level.checkpoints.length}</b></span>
+            <span>🎛️ 按钮 <b>${level.buttonPuzzle?level.buttonPuzzle.btns.length:'—'}</b></span>
+            <span>🎵 MJava=${level.musicJava} M=${level.music}</span>
+        `;
+        showToast(`生成成功！路径 ${level.path.length}格 · ${modeNames}${platformInfo}${branchInfo}`,'success');
+    }catch(e){
+        console.error(e);
+        showToast('生成出错：'+e.message,'error',4000);
+    }
+}
+
+async function downloadAllPngs(){
+    if(lastPngLayers.length===0){showToast('请先生成关卡','error');return;}
+    const baseName=lastFileBase;
+    try{
+        for(const layer of lastPngLayers){
+            const blob=await canvasToBlob(layer.canvas);
+            triggerDownload(blob,`${baseName}.${layer.z}.png`);
+            await sleep(180);
+        }
+        showToast(`已下载 ${lastPngLayers.length} 个 PNG`,'success');
+    }catch(e){showToast('下载失败：'+e.message,'error');}
+}
+
+async function downloadZip(){
+    if(!lastXml){showToast('请先生成关卡','error');return;}
+    if(typeof JSZip==='undefined'){showToast('JSZip 未加载','error');return;}
+    const zipBtn=document.getElementById('dlZipBtn');
+    const topZipBtn=document.getElementById('zipBtn');
+    zipBtn.disabled=true;topZipBtn.disabled=true;
+    const oldText=zipBtn.textContent;
+    zipBtn.textContent='⏳ 打包中…';
+    try{
+        const zip=new JSZip();
+        const baseName=lastFileBase;
+        zip.file(`${baseName}.xml`,lastXml);
+        zip.file(`${baseName}_sblocks.txt`,lastSblock);
+        for(const layer of lastPngLayers){
+            const blob=await canvasToBlob(layer.canvas);
+            zip.file(`${baseName}.${layer.z}.png`,blob);
+        }
+        const readme=`EDGE Level Generator v7.2 Pro\n============================\n关卡名   : ${lastLevel.name}\n种子     : ${lastLevel.seed}\n尺寸     : ${lastLevel.W}x${lastLevel.L}x${lastLevel.H}\n起点     : ${lastLevel.sx},${lastLevel.sy},${lastLevel.sz}\n终点     : ${lastLevel.ex},${lastLevel.ey},${lastLevel.ez}\n路径长度 : ${lastLevel.path.length} 格\n路径模式 : ${lastLevel.segModes.join('+')}\n平台中心 : ${(lastLevel.platformCenters||[]).length}\n岔路格数 : ${lastLevel.branchSet.size}\nButtonPuzzle: ${lastLevel.buttonPuzzle?'yes':'no'}\n`;
+        zip.file('README.txt',readme);
+        const blob=await zip.generateAsync({type:'blob'});
+        triggerDownload(blob,`${baseName}.zip`);
+        showToast('ZIP 打包完成','success');
+    }catch(e){showToast('打包失败：'+e.message,'error',4000);}
+    finally{
+        zipBtn.disabled=false;topZipBtn.disabled=false;
+        zipBtn.textContent=oldText;
+    }
+}
+
+document.getElementById('genBtn').addEventListener('click',doGenerate);
+document.getElementById('rerollBtn').addEventListener('click',()=>{document.getElementById('cfgSeed').value='';doGenerate();});
+document.querySelectorAll('#pane-gen .out-tab').forEach(tab=>{
+    tab.addEventListener('click',()=>{
+        document.querySelectorAll('#pane-gen .out-tab').forEach(t=>t.classList.remove('active'));
+        tab.classList.add('active');
+        const id=tab.dataset.tab;
+        document.getElementById('outXml').classList.toggle('hidden',id!=='xml');
+        document.getElementById('outSblock').classList.toggle('hidden',id!=='sblock');
+        document.getElementById('outPng').classList.toggle('hidden',id!=='png');
+    });
+});
+
+function copyText(text){
+    if(!text){showToast('还没有内容','error');return;}
+    navigator.clipboard.writeText(text).then(()=>showToast('已复制','success'))
+        .catch(()=>{
+            const ta=document.createElement('textarea');
+            ta.value=text;
+            document.body.appendChild(ta);ta.select();
+            try{document.execCommand('copy');showToast('已复制','success');}
+            catch(e){showToast('复制失败','error');}
+            document.body.removeChild(ta);
+        });
+}
+function downloadText(text,filename){
+    if(!text){showToast('还没有内容','error');return;}
+    const blob=new Blob([text],{type:'text/plain;charset=utf-8'});
+    triggerDownload(blob,filename);
+    showToast('已下载 '+filename,'success');
+}
+document.getElementById('copyXmlBtn').addEventListener('click',()=>copyText(lastXml));
+document.getElementById('copySbBtn').addEventListener('click',()=>copyText(lastSblock));
+document.getElementById('dlXmlBtn').addEventListener('click',()=>downloadText(lastXml,lastFileBase+'.xml'));
+document.getElementById('dlSbBtn').addEventListener('click',()=>downloadText(lastSblock,lastFileBase+'_sblocks.txt'));
+document.getElementById('dlPngBtn').addEventListener('click',downloadAllPngs);
+document.getElementById('dlZipBtn').addEventListener('click',downloadZip);
+document.getElementById('zipBtn').addEventListener('click',downloadZip);
+
+document.querySelectorAll('.main-tab').forEach(tab=>{
+    tab.addEventListener('click',()=>{
+        document.querySelectorAll('.main-tab').forEach(t=>t.classList.remove('active'));
+        tab.classList.add('active');
+        const id=tab.dataset.mtab;
+        document.getElementById('pane-gen').classList.toggle('hidden',id!=='gen');
+        document.getElementById('pane-conv').classList.toggle('hidden',id!=='conv');
+    });
+});
+
+document.getElementById('c1Btn').addEventListener('click',async()=>{
+    const xmlFile=document.getElementById('c1Xml').files[0];
+    const pngFiles=Array.from(document.getElementById('c1Png').files);
+    if(!xmlFile){showToast('请上传 XML','error');return;}
+    if(pngFiles.length===0){showToast('请上传 PNG','error');return;}
+    try{
+        await xmlFile.text();
+        const sorted=pngFiles.slice().sort((a,b)=>((a.name.match(/\d+/)||['0'])[0]|0)-((b.name.match(/\d+/)||['0'])[0]|0));
+        const allBlocks=[];
+        let zIndex=0;
+        for(const file of sorted){
+            const dataURL=await new Promise(res=>{const fr=new FileReader();fr.onload=e=>res(e.target.result);fr.readAsDataURL(file);});
+            const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('PNG 加载失败: '+file.name));i.src=dataURL;});
+            const canvas=document.createElement('canvas');
+            canvas.width=img.width;canvas.height=img.height;
+            const ctx=canvas.getContext('2d');
+            ctx.drawImage(img,0,0);
+            const data=ctx.getImageData(0,0,img.width,img.height).data;
+            allBlocks.push(...extractBlocksFromPixels(data,img.width,img.height,zIndex));
+            zIndex++;
+        }
+        allBlocks.sort((a,b)=>a.z-b.z||a.y-b.y||a.x-b.x);
+        let out='',lastZ=-1;
+        for(const b of allBlocks){
+            if(b.z!==lastZ){
+                if(lastZ!==-1)out+='\n';
+                out+=`<!-- 层 z=${b.z} -->\n`;
+                lastZ=b.z;
+            }
+            out+=`sblock(${b.x},${b.y},${b.z})\n`;
+        }
+        document.getElementById('c1Out').value=out;
+        showToast(`提取完成，共 ${allBlocks.length} 个方块`,'success');
+    }catch(e){console.error(e);showToast('转换失败：'+e.message,'error',4000);}
+});
+document.getElementById('c1ClearBtn').addEventListener('click',()=>{
+    document.getElementById('c1Xml').value='';
+    document.getElementById('c1Png').value='';
+    document.getElementById('c1Out').value='';
+    showToast('已清空','info');
+});
+document.getElementById('c1CopyBtn').addEventListener('click',()=>copyText(document.getElementById('c1Out').value));
+document.getElementById('c1DlBtn').addEventListener('click',()=>downloadText(document.getElementById('c1Out').value,'sblocks.txt'));
+
+let c2Layers=[];
+document.getElementById('c2Btn').addEventListener('click',()=>{
+    const sizeStr=document.getElementById('c2Size').value.trim();
+    const m=sizeStr.match(/^(\d+)\s*[x×*]\s*(\d+)\s*[x×*]\s*(\d+)$/i);
+    if(!m){showToast('尺寸格式无效，示例：20x26x3','error');return;}
+    const W=+m[1],L=+m[2],H=+m[3];
+    if(W<1||W>4096||L<1||L>4096||H<1||H>512){showToast('尺寸超出范围','error');return;}
+    const blocks=parseBlockTable(document.getElementById('c2Blocks').value);
+    if(blocks.length===0){showToast('未找到 sblock(x,y,z)','error');return;}
+    c2Layers=buildPngLayersFromBlocks(W,L,H,blocks);
+    renderPngGrid(c2Layers,document.getElementById('c2Preview'));
+    document.getElementById('c2DlBtn').disabled=false;
+    showToast(`已生成 ${c2Layers.length} 层 PNG`,'success');
+});
+document.getElementById('c2Xml').addEventListener('change',async(e)=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    try{
+        const text=await file.text();
+        const info=parseXMLInfo(text);
+        document.getElementById('c2Size').value=info.sizeStr;
+        document.getElementById('c2Name').value=sanitizeName(info.name);
+        showToast(`已读取 XML：${info.name} (${info.sizeStr})`,'success');
+    }catch(err){showToast('XML 解析失败：'+err.message,'error');}
+});
+document.getElementById('c2DlBtn').addEventListener('click',async()=>{
+    if(c2Layers.length===0){showToast('请先生成 PNG','error');return;}
+    const baseName=sanitizeName(document.getElementById('c2Name').value);
+    try{
+        for(const layer of c2Layers){
+            const blob=await canvasToBlob(layer.canvas);
+            triggerDownload(blob,`${baseName}.${layer.z}.png`);
+            await sleep(180);
+        }
+        showToast(`已下载 ${c2Layers.length} 个 PNG`,'success');
+    }catch(e){showToast('下载失败：'+e.message,'error');}
+});
+document.getElementById('c2ClearBtn').addEventListener('click',()=>{
+    document.getElementById('c2Xml').value='';
+    document.getElementById('c2Name').value='';
+    document.getElementById('c2Size').value='';
+    document.getElementById('c2Blocks').value='';
+    c2Layers=[];
+    document.getElementById('c2DlBtn').disabled=true;
+    document.getElementById('c2Preview').innerHTML='<div class="ph">PNG 预览会显示在这里…</div>';
+    showToast('已清空','info');
+});
+
+document.addEventListener('keydown',(e)=>{
+    if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){
+        const active=document.querySelector('.main-tab.active');
+        if(active&&active.dataset.mtab==='gen'){e.preventDefault();doGenerate();}
+    }
+});
+
+initMusicDropdowns();
+window.addEventListener('load',()=>setTimeout(doGenerate,100));
+
+})();
+</script>
+</body>
+</html>
