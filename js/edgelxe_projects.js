@@ -355,17 +355,16 @@ function openProjectManager() {
         dlg.className = 'select-dialog';
         dlg.style.display = 'none';
         dlg.innerHTML = `
-            <div class="dialog-box" style="min-width:560px; max-width:92vw; padding: 16px;">
+            <div class="dialog-box" style="width: 90vw; max-width: 800px; max-height: 85vh; display: flex; flex-direction: column; padding: 16px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;
                             margin-bottom:12px; gap:8px;">
                     <h4 style="margin:0; white-space:nowrap; flex-shrink:0;">📁 项目管理</h4>
-                    <!-- ★ 加上 width:auto; flex-shrink:0; 保证按钮不会拉伸 -->
                     <button id="pmCreateBtn" class="primary" style="width: auto; display: inline-block; flex-shrink: 0; padding:4px 14px;">
                         + 新建项目
                     </button>
                 </div>
-                <div id="pmList" style="max-height:60vh; overflow-y:auto;"></div>
-                <div style="text-align:right; margin-top:12px;">
+                <div id="pmList" style="flex: 1; overflow-y: auto; min-height: 200px;"></div>
+                <div style="text-align:right; margin-top:12px; flex-shrink: 0;">
                     <button class="cancel-btn" onclick="PM.close()" style="width:auto; display:inline-block; margin:0; flex-shrink: 0;">
                         关闭
                     </button>

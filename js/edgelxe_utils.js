@@ -79,30 +79,79 @@ function getDisplayId(elemId, type) {
 	return xmlId ? `${elemId}(${xmlId})` : `${elemId}(无ID)`;
 }
 
-// 选择对话框
+// 选择对话框（改为鼠标旁的下拉悬浮框）
 function showSelectDialog(items, callback) {
-	const options = document.getElementById('dialogOptions');
-	options.innerHTML = '';
-	items.forEach((item) => {
-		const btn = document.createElement('button');
-		btn.textContent = item.desc;
-		btn.onclick = () => {
-			closeSelectDialog();
-			callback(item);
-		};
-		options.appendChild(btn);
-	});
-	selectDialog.style.display = 'flex';
-	selectDialog.classList.add('active');
-	window._selectCallback = callback;
+    const oldMenu = document.getElementById('floatingSelectDialog');
+    if (oldMenu) oldMenu.remove();
+
+    const menu = document.createElement('div');
+    menu.id = 'floatingSelectDialog';
+    // 获取当前鼠标点击的屏幕坐标
+    const px = window._lastMouseClickX || 100;
+    const py = window._lastMouseClickY || 100;
+    
+    menu.style.cssText = `
+        position: fixed;
+        left: ${px}px;
+        top: ${py}px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border-strong);
+        box-shadow: var(--shadow-menu);
+        z-index: 10000;
+        max-height: 250px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        min-width: 120px;
+    `;
+
+    items.forEach((item) => {
+        const btn = document.createElement('div');
+        btn.textContent = item.desc;
+        btn.style.cssText = `padding: 6px 12px; font-size: 12px; color: var(--text); cursor: pointer; border-bottom: 1px solid var(--border);`;
+        btn.onmouseenter = () => btn.style.background = 'var(--bg-hover)';
+        btn.onmouseleave = () => btn.style.background = 'transparent';
+        
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            closeSelectDialog();
+            callback(item);
+        };
+        menu.appendChild(btn);
+    });
+
+    document.body.appendChild(menu);
+
+    // ★ 核心：防止下拉框超出屏幕右/下边缘
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = (px - rect.width) + 'px';
+    if (rect.bottom > window.innerHeight) menu.style.top = (py - rect.height) + 'px';
+
+    setTimeout(() => {
+        const closeHandler = (e) => {
+            if (!menu.contains(e.target)) {
+                closeSelectDialog();
+                document.removeEventListener('pointerdown', closeHandler);
+            }
+        };
+        document.addEventListener('pointerdown', closeHandler);
+    }, 10);
+}
+
+function handleOutsideClick(e) {
+    const menu = document.getElementById('floatingSelectDialog');
+    if (menu && !menu.contains(e.target)) {
+        closeSelectDialog();
+    }
 }
 
 function closeSelectDialog() {
-	selectDialog.style.display = 'none';
-	selectDialog.classList.remove('active');
-	window._selectCallback = null;
+    const menu = document.getElementById('floatingSelectDialog');
+    if (menu) menu.remove();
+    window._selectCallback = null;
 }
 window.closeSelectDialog = closeSelectDialog;
+
 selectDialog.addEventListener('click', (e) => {
 	if (e.target === selectDialog) closeSelectDialog();
 });

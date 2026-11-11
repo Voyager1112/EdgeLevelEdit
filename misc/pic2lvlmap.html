@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>图片转二色 / 灰阶工具</title>
 <script src="../js/online/jszip.min.js"></script>
+<!-script src="./electron-storage.js"></script-->
 <script>
 (function() {
 	if (typeof JSZip === 'undefined') {
@@ -910,17 +911,60 @@
     });
   }
 
-  function triggerDownload(blob, filename) {
+  async function triggerDownload(blob, filename) {
+    // ★ 双重保险：检查是否有主界面的 localStorage 标记，或者 require 是否存在
+    const isElec = (typeof require !== 'undefined') || (localStorage.getItem('edge_xml_editor') !== null);
+    
+    console.log("▶ [调试] 开始下载:", filename, "| isElec:", isElec, "| require:", typeof require);
+    
+    if (isElec) {
+        try {
+            // 如果 require 存在，直接调 IPC
+            if (typeof require !== 'undefined') {
+                const { ipcRenderer } = require('electron');
+                let customDir = '';
+                try {
+                    const raw = localStorage.getItem('edge_xml_editor');
+                    if (raw) {
+                        const data = JSON.parse(raw);
+                        if (data.settings && data.settings.useCustomExportDir && data.settings.customExportPath) {
+                            customDir = data.settings.customExportPath;
+                        }
+                    }
+                } catch (e) {}
+
+                const arrayBuffer = await blob.arrayBuffer();
+                const buffer = Array.from(new Uint8Array(arrayBuffer));
+                
+                console.log("▶ [调试] 正在发送 IPC...");
+                const result = await ipcRenderer.invoke('save-file', {
+                    defaultName: filename,
+                    customDir: customDir,
+                    buffer: buffer
+                });
+                
+                if (result.success) {
+                    console.log('✅ 文件已保存至:', result.path);
+                    alert('✅ 保存成功！\n路径: ' + result.path);
+                } else if (result.error !== 'canceled') {
+                    alert('保存失败: ' + result.error);
+                }
+                return; // 成功调用IPC后直接返回，不再走后面的浏览器下载
+            }
+        } catch(e) {
+            console.error('❌ IPC 保存失败:', e);
+        }
+    }
+    
+    // 如果上面都不行，只能用浏览器原生下载
+    console.log("▶ [调试] 降级为原生下载");
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 3000);
   }
-
+  
   function safeName(s) {
     return (s || 'level').replace(/[\\/:*?"<>|]/g, '_').slice(0, 64) || 'level';
   }

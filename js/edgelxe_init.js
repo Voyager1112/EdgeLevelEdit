@@ -1,14 +1,18 @@
 // 初始化
 function init() {
-	// 用于画笔模式节流
 	let _lastBrushPos = null;
-	// 在 init 开头检查是否已添加
 	if (!gridEl.contains(canvas)) {
 		gridEl.innerHTML = '';
 		gridEl.appendChild(canvas);
 	}
 	ensureScriptLoaded();
 	const hasCache = loadCache();
+    
+    // ★ 核心修复：确保旧缓存加载后，分块属性存在
+    if (!state.currentChunk) state.currentChunk = { x: 0, y: 0 };
+    if (!state.settings.chunkSize) state.settings.chunkSize = 100;
+    if (!state.settings.chunkThreshold) state.settings.chunkThreshold = 500;
+
 	if (state.staticColor) {
 		const colorPicker = document.getElementById('staticColorPicker');
 		const hex = '#' + [state.staticColor.r, state.staticColor.g, state.staticColor.b].map(c => c.toString(16).padStart(2, '0')).join('');
@@ -18,112 +22,50 @@ function init() {
     function loadDemo() {
         initStaticBlocks();
         const demo = [
-            { id: 'F1', x: 5, y: 5, z: 0, floatTime: 20 },
-            { id: 'P1', x: 5, y: 5, z: 1, energy: 1 },
+            { id: 'F1', x: 5, y: 5, z: 0, floatTime: 20 }, { id: 'P1', x: 5, y: 5, z: 1, energy: 1 },
             { id: 'R1', x: 2, y: 5, z: 1, type: 'grow', visible: true, radiusX: 0, radiusY: 0 },
             { id: 'R2', x: 4, y: 5, z: 1, type: 'shrink', visible: true, radiusX: 0, radiusY: 0 },
-            { id: 'B1', x: 5, y: 2, z: 1, enabled: true, north: { enabled: false, startDelay: 0,
-                    pulseRate: 0 }, east: { enabled: false, startDelay: 0, pulseRate: 0 },
-                south: { enabled: false, startDelay: 0, pulseRate: 0 }, west: { enabled: false,
-                    startDelay: 0, pulseRate: 0 } },
+            { id: 'B1', x: 5, y: 2, z: 1, enabled: true, north: { enabled: false, startDelay: 0, pulseRate: 0 }, east: { enabled: false, startDelay: 0, pulseRate: 0 }, south: { enabled: false, startDelay: 0, pulseRate: 0 }, west: { enabled: false, startDelay: 0, pulseRate: 0 } },
             { id: 'CP1', x: 6, y: 15, z: 0, respawnZ: 0, radiusX: 0, radiusY: 0 },
-            { id: 'CT1', x: 10, y: 15, z: 0, radiusX: 0, radiusY: 0, zoom: -1, angle: 22, fov: 22,
-                startDelay: 0, duration: 0, singleUse: false, useAngle: true },
-            { id: 'Btn1', x: 7, y: 2, z: 1, visible: true, disableCount: 0, mode: 'StayDown',
-                movingPlatformID: '', affectMoving: '', affectBumpers: '', triggerAchievements: '',
-                affectButtons: '' },
+            { id: 'CT1', x: 10, y: 15, z: 0, radiusX: 0, radiusY: 0, zoom: -1, angle: 22, fov: 22, startDelay: 0, duration: 0, singleUse: false, useAngle: true },
+            { id: 'Btn1', x: 7, y: 2, z: 1, visible: true, disableCount: 0, mode: 'StayDown', movingPlatformID: '', affectMoving: '', affectBumpers: '', triggerAchievements: '', affectButtons: '' },
         ];
-        state.fallingPlatforms.push(demo[0]);
-        state.prisms.push(demo[1]);
-        state.resizers.push(demo[2]);
-        state.resizers.push(demo[3]);
-        state.bumpers.push(demo[4]);
-        state.checkpoints.push(demo[5]);
-        state.cameraTriggers.push(demo[6]);
-        state.buttons.push(demo[7]);
+        state.fallingPlatforms.push(demo[0]); state.prisms.push(demo[1]); state.resizers.push(demo[2]); state.resizers.push(demo[3]);
+        state.bumpers.push(demo[4]); state.checkpoints.push(demo[5]); state.cameraTriggers.push(demo[6]); state.buttons.push(demo[7]);
         state.nextIdCounter = 10;
         
-        // 生成底层静态方块
         const layer0 = state.staticBlocks[0];
         if (layer0) {
-            for (let y = 2; y < 6; y++) {
-                for (let x = 2; x < 8; x++) {
-                    layer0[y][x] = { r: 255, g: 255, b: 128 };
-                }
-            }
+            for (let y = 2; y < 6; y++) for (let x = 2; x < 8; x++) layer0[y][x] = { r: 255, g: 255, b: 128 };
         }
 
-        // ===== 新增：刷新所有面板与渲染 =====
-        syncLevelUI();
-        updateCanvasRangeFromSize();
-        updateLayerMax();
-        requestRender();
-        updatePanel();
-        updateElemList();
-        updateStatus();
-
-        // ===== 新增：重置撤销基线并存入本地缓存 =====
-        state._undoStack = [];
-        state._redoStack = [];
-        state._lastSavedSnapshot = _serializeHistory();
-        
-        if (typeof saveCache === 'function') {
-            saveCache();
-        }
-
-        // ===== 新增：自动创建并切到 Demo 项目 =====
+        syncLevelUI(); updateCanvasRangeFromSize(); updateLayerMax(); requestRender(); updatePanel(); updateElemList(); updateStatus();
+        state._undoStack = []; state._redoStack = []; state._lastSavedSnapshot = _serializeHistory();
+        if (typeof saveCache === 'function') saveCache();
         if (window.PM && typeof window.PM.createProject === 'function') {
             try {
                 const data = JSON.parse(_serializeHistory());
                 const pid = window.PM.createProject('Demo', data);
                 window.PM.setCurrentProjectId(pid);
-                
-                // 将当前状态强制同步到项目中
-                if (typeof window.PM.sync === 'function') {
-                    window.PM.sync();
-                }
-            } catch (e) {
-                console.error('自动创建 Demo 项目失败:', e);
-            }
+                if (typeof window.PM.sync === 'function') window.PM.sync();
+            } catch (e) {}
         }
-
         showToast('已加载示例数据，并创建 Demo 项目');
     }
     
 	if (hasCache) {
 		const { w, l, h } = state.level.size;
-		/*for (let z = 0; z < h; z++) {
-			if (!state.staticBlocks[z]) {
-				state.staticBlocks[z] = Array.from({ length: l }, () => Array(w).fill(null));
-			} else {
-				const layer = state.staticBlocks[z];
-				for (let y = 0; y < l; y++) {
-					if (!layer[y]) layer[y] = Array(w).fill(null);
-					else if (layer[y].length < w) {
-						for (let x = layer[y].length; x < w; x++) layer[y][x] = null;
-					}
-				}
-				while (layer.length < l) layer.push(Array(w).fill(null));
-			}
-		}*/
-        
         for (const zKey in state.staticBlocks) {
             const zNum = parseInt(zKey, 10);
-            if (isNaN(zNum) || zNum >= h) {
-                delete state.staticBlocks[zKey];
-                continue;
-            }
+            if (isNaN(zNum) || zNum >= h) { delete state.staticBlocks[zKey]; continue; }
             const layer = state.staticBlocks[zKey];
             if (!layer) continue;
             for (let y = 0; y < l; y++) {
                 if (!layer[y]) layer[y] = Array(w).fill(null);
-                else if (layer[y].length < w) {
-                    for (let x = layer[y].length; x < w; x++) layer[y][x] = null;
-                }
+                else if (layer[y].length < w) for (let x = layer[y].length; x < w; x++) layer[y][x] = null;
             }
             while (layer.length < l) layer.push(Array(w).fill(null));
         }
-        
 		const filterPos = (arr, getPos) => arr.filter(item => {
 			const p = getPos(item);
 			return p && typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number' && !isNaN(p.x) && !isNaN(p.y) && !isNaN(p.z);
@@ -135,17 +77,10 @@ function init() {
 		state.bumpers = filterPos(state.bumpers, m => ({ x: m.x, y: m.y, z: m.z }));
 		state.checkpoints = filterPos(state.checkpoints, m => ({ x: m.x, y: m.y, z: m.z }));
 		state.cameraTriggers = filterPos(state.cameraTriggers, m => ({ x: m.x, y: m.y, z: m.z }));
-		state.buttons = state.buttons.filter(m => {
-			if (m.movingPlatformID) return true;
-			// 否则必须坐标有效
-			return m.x !== null && m.x !== undefined && isFinite(m.x) &&
-				   m.y !== null && m.y !== undefined && isFinite(m.y) &&
-				   m.z !== null && m.z !== undefined && isFinite(m.z);
-		});
+		state.buttons = state.buttons.filter(m => m.movingPlatformID ? true : (m.x != null && isFinite(m.x) && m.y != null && isFinite(m.y) && m.z != null && isFinite(m.z)));
 		state.otherCubes = filterPos(state.otherCubes, m => ({ x: m.triggerX, y: m.triggerY, z: m.triggerZ }));
 		state.darkCubes = filterPos(state.darkCubes, m => ({ x: m.triggerX, y: m.triggerY, z: m.triggerZ }));
 		syncLevelUI();
-		//if (state.currentLayer > h) state.currentLayer = h;
 		layerInput.value = state.currentLayer;
 		rebuildSpatialIndex();
 		showToast('已恢复缓存数据');
@@ -153,12 +88,9 @@ function init() {
         loadDemo();
 	}
 
-	syncVisibilityUI();
-    requestRender();
-	updatePanel();
-	updateElemList();
-	updateStatus();
+	syncVisibilityUI(); requestRender(); updatePanel(); updateElemList(); updateStatus();
 
+    // 工具栏绑定
 	document.getElementById('toolStatic').addEventListener('click', () => setTool('static'));
 	document.getElementById('toolMoving').addEventListener('click', () => setTool('moving'));
 	document.getElementById('toolFalling').addEventListener('click', () => setTool('falling'));
@@ -169,102 +101,115 @@ function init() {
 	document.getElementById('toolCheckpoint').addEventListener('click', () => setTool('checkpoint'));
 	document.getElementById('toolCameraTrigger').addEventListener('click', () => setTool('cameratrigger'));
 	document.getElementById('toolButton').addEventListener('click', () => setTool('button'));
-    document.getElementById('toolSeqButton').addEventListener('click', function() {
-        // 优先以"当前选中的按钮序列"作为目标，即使之前已设置过 seqEditingId
-        if (state.selectedElement && state.selectedElement.type === 'buttonsequence') {
-            state.seqEditingId = state.selectedElement.id;
-        } else if (!state.seqEditingId) {
-            showToast('请先选中一个按钮序列，再点击"序列子按钮"');
-            return;
-        }
-        setTool('seqbutton');
-        showToast(`序列子按钮模式：目标序列 #${state.seqEditingId}`);
-    });
 	document.getElementById('toolOtherCube').addEventListener('click', () => setTool('othercube'));
 	document.getElementById('toolDarkCube').addEventListener('click', () => setTool('darkcube'));
 	document.getElementById('toolEraser').addEventListener('click', () => setTool('eraser'));
+    document.getElementById('toolWaypoint').addEventListener('click', () => setTool('waypoint'));
+    document.getElementById('toolSeqButton').addEventListener('click', function() {
+        if (state.selectedElement && state.selectedElement.type === 'buttonsequence') state.seqEditingId = state.selectedElement.id;
+        else if (!state.seqEditingId) return showToast('请先选中一个按钮序列');
+        setTool('seqbutton');
+    });
+    document.getElementById('toolMultiSelect').addEventListener('click', () => { setTool('multiselect'); state.multiSelection = []; requestRender(); });
+
 	layerInput.addEventListener('change', changeLayer);
-	// 层数加减按钮
-	document.getElementById('layerDecreaseBtn').addEventListener('click', function() {
-		changeLayerBy(-1);
-	});
-	document.getElementById('layerIncreaseBtn').addEventListener('click', function() {
-		changeLayerBy(1);
-	});
+	document.getElementById('layerDecreaseBtn').addEventListener('click', () => changeLayerBy(-1));
+	document.getElementById('layerIncreaseBtn').addEventListener('click', () => changeLayerBy(1));
 	document.getElementById('exportPngBtn').addEventListener('click', exportPNG);
 	document.getElementById('exportXmlBtn').addEventListener('click', exportXML);
+    document.getElementById('exportZipBtn').addEventListener('click', exportZip);
 	document.getElementById('clearLayerBtn').addEventListener('click', clearLayer);
-
-	document.getElementById('loadXmlBtn').addEventListener('click', () => {
-		fileXmlInput.click();
-	});
+	document.getElementById('loadXmlBtn').addEventListener('click', () => fileXmlInput.click());
 
     fileXmlInput.addEventListener('change', async (e) => {
         if (e.target.files.length === 0) return;
         const files = Array.from(e.target.files);
         e.target.value = '';
-
-        // 如果是单个 zip 文件 → 走 zip 导入
         if (files.length === 1 && files[0].name.toLowerCase().endsWith('.zip')) {
-            // 1. 确认导入
-            if (!confirm('检测到 ZIP 文件，是否确认导入？\n\n点击【确定】→ 继续导入\n点击【取消】→ 取消导入')) {
-                return;
-            }
-            // 2. 可选：先导出当前项目
-            if (hasProjectData()) {
-                const exportFirst = confirm(
-                    '是否先导出当前项目为 ZIP？\n\n' +
-                    '点击【确定】→ 先导出，再导入\n' +
-                    '点击【取消】→ 不导出，直接导入'
-                );
-                if (exportFirst) {
-                    exportZip();
-                    await new Promise(r => setTimeout(r, 200));
-                }
+            if (!confirm('检测到 ZIP 文件，是否确认导入？')) return;
+            if (hasProjectData() && confirm('是否先导出当前项目为 ZIP？')) {
+                exportZip(); await new Promise(r => setTimeout(r, 200));
             }
             await loadFromZip(files[0]);
             return;
         }
-
-        // 原有的 XML + PNG 导入流程
-        if (hasProjectData()) {
-            const exportFirst = confirm(
-                '导入会覆盖当前项目。\n\n' +
-                '点击【确定】→ 先导出当前项目为 ZIP，再导入\n' +
-                '点击【取消】→ 不导出，直接导入（丢弃当前数据）'
-            );
-            if (exportFirst) {
-                exportZip();
-                setTimeout(() => loadXMLAndPNG(files), 150);
-                return;
-            }
+        if (hasProjectData() && confirm('导入会覆盖当前项目。\n\n是否先导出当前项目为 ZIP？')) {
+            exportZip(); setTimeout(() => loadXMLAndPNG(files), 150); return;
         }
         loadXMLAndPNG(files);
     });
 
-	zoomSlider.addEventListener('input', function() {
-		setZoom(parseInt(this.value));
-	});
+	zoomSlider.addEventListener('input', function() { setZoom(parseInt(this.value)); });
 	zoomNumber.addEventListener('change', function() {
 		let val = parseInt(this.value) || 65;
-		if (val < 10) val = 10;
-		if (val > 500) val = 500;
-		setZoom(val);
+		setZoom(Math.max(10, Math.min(500, val)));
 	});
 	setZoom(65);
 
-	window.addEventListener('resize', () => {
-		requestRender();
-	});
+    // 键盘
+    document.addEventListener('keydown', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+        const isMac = navigator.platform.toUpperCase().includes('MAC');
+        const ctrl = isMac ? e.metaKey : e.ctrlKey;
+        if (ctrl && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+        if ((ctrl && e.shiftKey && e.key.toLowerCase() === 'z') || (ctrl && e.key.toLowerCase() === 'y')) { e.preventDefault(); redo(); return; }
+        if (e.key === 'p' && state.interactionMode === 'edit' && typeof threeCamera !== 'undefined' && threeCamera) {
+			const cameraPos = threeCamera.position; const { w, l } = state.level.size;
+			placeElementAt(state.currentTool, Math.round(cameraPos.x + w / 2 - 0.5), Math.round(cameraPos.z + l / 2 - 0.5), Math.round(cameraPos.y - 0.5));
+		}
+        if (e.key === 'Escape') {
+            const hs = document.getElementById('helpSidebar'); const ho = document.getElementById('helpOverlay');
+            if (hs && hs.classList.contains('active')) { hs.classList.remove('active'); if(ho) ho.classList.remove('active'); }
+        }
+        if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+            let moved = false;
+            if (e.key === 'ArrowLeft') { state.currentChunk.x--; moved = true; }
+            if (e.key === 'ArrowRight') { state.currentChunk.x++; moved = true; }
+            if (e.key === 'ArrowUp') { state.currentChunk.y--; moved = true; }
+            if (e.key === 'ArrowDown') { state.currentChunk.y++; moved = true; }
+            if (moved) { e.preventDefault(); requestRender(); }
+        }
+    });
 
-	setInterval(saveCache, 30000);
-	
-	// ===== 帮助侧栏 =====
-	const helpSidebar = document.getElementById('helpSidebar');
-	const helpOverlay = document.getElementById('helpOverlay');
-	const helpBody = document.getElementById('helpBody');
-	const helpCloseBtn = document.getElementById('helpCloseBtn');
+    document.getElementById('undoBtn')?.addEventListener('click', undo);
+    document.getElementById('redoBtn')?.addEventListener('click', redo);
+    document.getElementById('canvasAddMode').addEventListener('change', function() { setCanvasEditMode(this.checked ? 'add' : 'select'); });
+    const pmBtn = document.getElementById('projectManagerBtn'); if (pmBtn) pmBtn.addEventListener('click', () => window.PM.open());
 
+	// ★ 恢复：拖拽文件到网页直接导入
+	document.addEventListener('dragover', function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+    document.addEventListener('drop', async function(e) {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length === 0) return;
+        if (files.length === 1 && files[0].name.toLowerCase().endsWith('.zip')) {
+            if (!confirm('检测到 ZIP 文件，是否确认导入？')) return;
+            if (hasProjectData() && confirm('是否先导出当前项目为 ZIP？')) {
+                exportZip(); await new Promise(r => setTimeout(r, 200));
+            }
+            await loadFromZip(files[0]);
+            return;
+        }
+        let hasXml = false, hasPng = false;
+        for (let f of files) {
+            if (f.name.toLowerCase().endsWith('.xml')) hasXml = true;
+            if (f.name.toLowerCase().endsWith('.png')) hasPng = true;
+        }
+        if (!hasXml && !hasPng) return showToast('请拖入 XML / PNG / ZIP 文件');
+        if (!confirm('检测到拖入的文件，是否确认导入？')) return;
+        if (hasProjectData() && confirm('是否先导出当前项目为 ZIP？')) {
+            exportZip(); setTimeout(() => loadXMLAndPNG(files), 150); return;
+        }
+        loadXMLAndPNG(files);
+    });
+
+	// ★ 删除：不要写死的 30 秒保存，完全交给设置面板（uniInterface 里的节流）去控制
+	// setInterval(saveCache, 30000); 
+
+	// 帮助侧栏
+	const helpSidebar = document.getElementById('helpSidebar'); const helpOverlay = document.getElementById('helpOverlay');
+	const helpBody = document.getElementById('helpBody'); const helpCloseBtn = document.getElementById('helpCloseBtn');
+    
 	// 帮助文档内容（支持多行文本）
 	const rawDoc = `
 Level 元素
@@ -643,984 +588,617 @@ B 通道（模型高度）
 
 23.可以用像素颜色控制方块类型，静态方块模型主题和高度，详情见格式参考-关卡地图部分
 
-24..撤销/重做功能做多可保存50步操作。快捷键：Ctrl+Z / Ctrl+Y
+24.撤销/重做功能做多可保存50步操作。快捷键：Ctrl+Z / Ctrl+Y
 
 25.拆分路点功能：可以把一个路点拆分成多个来避免traveltime太长时可能出现的回弹bug，点击拆分，输入拆分份数就可以等分路点，效果和拆分前一致，可能要注意改一下循环索引
 `;
-
-    // 转义 XML 标签（先 & 再 < >，顺序不能反）
-    function escapeForDisplay(s) {
-        return s
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-    }
-    const escapedDoc  = escapeForDisplay(rawDoc);
-    const escapedDoc1 = escapeForDisplay(rawDoc1);
-
-	const helpContent = `
+    
+    // 转义函数
+    function escapeForDisplay(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    
+	// 填充帮助内容
+	if (helpBody) helpBody.innerHTML = `
         <div class="section">
 			<h3>📄 使用说明</h3>
-            <pre style="font-family: 'Consolas', monospace; font-size: 12px; line-height: 1.6; color: var(--text); background: var(--bg-input); padding: 16px; border: 1px solid var(--border); border-radius: 0; overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin-top: 8px;">${escapedDoc1}</pre>
+            <pre style="font-family: 'Consolas', monospace; font-size: 12px; line-height: 1.6; color: var(--text); background: var(--bg-input); padding: 16px; border: 1px solid var(--border); border-radius: 0; overflow-x: auto; white-space: pre-wrap; word-break: break-word; margin-top: 8px;">${escapeForDisplay(rawDoc1)}</pre>
 			<h3 style="margin-top: 20px;">📄 Edge 关卡格式参考</h3>
-			<p style="color: var(--text-dim); font-size: 12px;">以下内容摘自 EDGEFans 镜像(https://github.com/Mygod/edgefans-archive)</p>
-			<pre style="font-family: 'Consolas', monospace; font-size: 12px; line-height: 1.6; color: var(--text); background: var(--bg-input); padding: 16px; border: 1px solid var(--border); border-radius: 0; overflow-x: auto; white-space: pre-wrap; word-break: break-word;">${escapedDoc}</pre>
+			<pre style="font-family: 'Consolas', monospace; font-size: 12px; line-height: 1.6; color: var(--text); background: var(--bg-input); padding: 16px; border: 1px solid var(--border); border-radius: 0; overflow-x: auto; white-space: pre-wrap; word-break: break-word;">${escapeForDisplay(rawDoc)}</pre>
 		</div>
 	`;
-
-	// 填充帮助内容
-	if (helpBody) helpBody.innerHTML = helpContent;
-
-	// 打开帮助
 	const helpBtn = document.getElementById('helpBtn');
-	if (helpBtn) {
-		helpBtn.addEventListener('click', function() {
-			if (helpSidebar) helpSidebar.classList.add('active');
-			if (helpOverlay) helpOverlay.classList.add('active');
-		});
-	}
-
-	// 关闭帮助
-	if (helpCloseBtn) {
-		helpCloseBtn.addEventListener('click', function() {
-			if (helpSidebar) helpSidebar.classList.remove('active');
-			if (helpOverlay) helpOverlay.classList.remove('active');
-		});
-	}
-
-	// 点击遮罩关闭
-	if (helpOverlay) {
-		helpOverlay.addEventListener('click', function() {
-			if (helpSidebar) helpSidebar.classList.remove('active');
-			if (helpOverlay) helpOverlay.classList.remove('active');
-		});
-	}
-
-	// ESC 键关闭
-	document.addEventListener('keydown', function(e) {
-		if (e.key === 'Escape' && helpSidebar && helpSidebar.classList.contains('active')) {
-			if (helpSidebar) helpSidebar.classList.remove('active');
-			if (helpOverlay) helpOverlay.classList.remove('active');
-		}
-	});
+	if (helpBtn) helpBtn.addEventListener('click', () => { helpSidebar?.classList.add('active'); helpOverlay?.classList.add('active'); });
+	if (helpCloseBtn) helpCloseBtn.addEventListener('click', () => { helpSidebar?.classList.remove('active'); helpOverlay?.classList.remove('active'); });
+	if (helpOverlay) helpOverlay.addEventListener('click', () => { helpSidebar?.classList.remove('active'); helpOverlay?.classList.remove('active'); });
 	
-	// 初始化画布宽度
-	const canvasWrap = document.getElementById('canvasWrap');
-	canvasWrap.style.width = '100%';
-	canvasWrap.style.transition = 'width 0.4s ease';
-
-    // 3D宽度控制
-    const width3dSlider = document.getElementById('width3dSlider');
-    const width3dNumber = document.getElementById('width3dNumber');
-
+	// 3D 视图控制
+    const width3dSlider = document.getElementById('width3dSlider'); const width3dNumber = document.getElementById('width3dNumber');
     if (width3dSlider && width3dNumber) {
         function set3DWidth(value) {
             value = Math.max(5, Math.min(95, value));
-            width3dSlider.value = value;
-            width3dNumber.value = value;
+            width3dSlider.value = value; width3dNumber.value = value;
             const container = document.getElementById('view3dContainer');
             if (container.classList.contains('active')) {
-                container.style.flex = `0 0 ${value}%`;
-                container.style.width = `${value}%`;
-                setTimeout(() => {
-                    if (typeof resizeThreeRenderer === 'function') resizeThreeRenderer();
-                    if (typeof render3D === 'function') render3D();
-                }, 50);
+                container.style.flex = `0 0 ${value}%`; container.style.width = `${value}%`;
+                setTimeout(() => { if (typeof resizeThreeRenderer === 'function') resizeThreeRenderer(); if (typeof render3D === 'function') render3D(); }, 50);
             }
         }
-
-        width3dSlider.addEventListener('input', function() {
-            set3DWidth(parseInt(this.value));
-        });
-
-        width3dNumber.addEventListener('change', function() {
-            let val = parseInt(this.value) || 50;
-            set3DWidth(val);
-        });
+        width3dSlider.addEventListener('input', function() { set3DWidth(parseInt(this.value)); });
+        width3dNumber.addEventListener('change', function() { set3DWidth(parseInt(this.value) || 50); });
     }
-	// 3D预览按钮 - 使用当前宽度
-	document.getElementById('toggle3dBtn').addEventListener('click', function() {
-		show3D();
-	});
 
-	// 确保关闭按钮正常工作
-	document.getElementById('close3dBtn').addEventListener('click', function() {
-		hide3D();
-	});
-	
-	// 重置视角按钮
-	document.getElementById('resetCameraBtn').addEventListener('click', function() {
-		resetCamera();
-	});
+	document.getElementById('toggle3dBtn').addEventListener('click', show3D);
+	document.getElementById('close3dBtn').addEventListener('click', hide3D);
+	document.getElementById('resetCameraBtn').addEventListener('click', resetCamera);
 
-	// 3D预览按钮 - 刷新时保留视角
-	document.getElementById('toggle3dBtn').addEventListener('click', function() {
-		show3D();
-	});
-	
-	document.getElementById('exportZipBtn').addEventListener('click', exportZip);
-	
-	// 恢复绘制模式高亮
-	const singleBtn = document.getElementById('toolSingle');
-	const brushBtn = document.getElementById('toolBrush');
-	if (state.drawMode === 'brush') {
-		brushBtn.classList.add('active');
-		singleBtn.classList.remove('active');
-	} else {
-		singleBtn.classList.add('active');
-		brushBtn.classList.remove('active');
-	}
-	
-	document.getElementById('levelUseAngle').addEventListener('change', function() {
-		state.levelUseAngle = this.checked;
-		syncLevelUI();
-	});
-	
-	updateLayerMax();
-	
-	// ===== 拖放加载 =====
-	document.addEventListener('dragover', function(e) {
-		e.preventDefault();
-		e.dataTransfer.dropEffect = 'copy';
-	});
-
-    document.addEventListener('drop', async function(e) {
-        e.preventDefault();
-        const files = Array.from(e.dataTransfer.files);
-        if (files.length === 0) return;
-        
-        // ---- ZIP 优先分支 ----
-        if (files.length === 1 && files[0].name.toLowerCase().endsWith('.zip')) {
-            if (!confirm('检测到 ZIP 文件，是否确认导入？\n\n点击【确定】→ 继续导入\n点击【取消】→ 取消导入')) {
-                return;
-            }
-            if (hasProjectData()) {
-                const exportFirst = confirm(
-                    '是否先导出当前项目为 ZIP？\n\n' +
-                    '点击【确定】→ 先导出，再导入\n' +
-                    '点击【取消】→ 不导出，直接导入'
-                );
-                if (exportFirst) {
-                    exportZip();
-                    await new Promise(r => setTimeout(r, 200));
-                }
-            }
-            await loadFromZip(files[0]);
-            return;
-        }
-        
-        let hasXml = false, hasPng = false;
-        for (let f of files) {
-            if (f.name.toLowerCase().endsWith('.xml')) hasXml = true;
-            if (f.name.toLowerCase().endsWith('.png')) hasPng = true;
-        }
-        if (!hasXml && !hasPng) {
-            showToast('请拖入 XML / PNG / ZIP 文件');
-            return;
-        }
-        // 1. 先确认导入
-        if (!confirm('检测到拖入的文件，是否确认导入？\n\n点击【确定】→ 继续导入\n点击【取消】→ 取消导入')) {
-            return;
-        }
-        // 2. 再问是否导出当前项目
-        if (hasProjectData()) {
-            const exportFirst = confirm(
-                '是否先导出当前项目为 ZIP？\n\n' +
-                '点击【确定】→ 先导出，再导入\n' +
-                '点击【取消】→ 不导出，直接导入'
-            );
-            if (exportFirst) {
-                exportZip();
-                setTimeout(() => loadXMLAndPNG(files), 150);
-                return;
-            }
-        }
-        loadXMLAndPNG(files);
-    });
-	
-	// 在 init 函数末尾（或 DOMContentLoaded 回调内）添加：
-	document.addEventListener('touchend', () => {
-		state.isDrawing = false;
-	});
-	document.addEventListener('touchcancel', () => {
-		state.isDrawing = false;
-	});
-	
-	// ---- 3D 视图控制 ----
 	const cameraDistInput = document.getElementById('cameraDistInput');
 	if (cameraDistInput) {
-		// 初始化默认距离
 		const { w, l, h } = state.level.size;
-		const maxDim = Math.max(w, l, h);
-		const defaultDist = maxDim * 1.8 + 6;
-		cameraDistInput.value = defaultDist.toFixed(1);
-		
+		cameraDistInput.value = (Math.max(w, l, h) * 1.8 + 6).toFixed(1);
 		cameraDistInput.addEventListener('change', function() {
-			let val = parseFloat(this.value);
-			if (isNaN(val) || val < 0.1) val = 0.1;
-			if (val > 200) val = 200;
+			let val = parseFloat(this.value) || 0.1;
+			val = Math.max(0.1, Math.min(200, val));
 			this.value = val.toFixed(1);
 			setCameraDistance(val, true);
 		});
-		
 		cameraDistInput.addEventListener('input', function() {
 			let val = parseFloat(this.value);
-			if (!isNaN(val) && val >= 0.1 && val <= 200) {
-				setCameraDistance(val, false);
-			}
+			if (!isNaN(val) && val >= 0.1 && val <= 200) setCameraDistance(val, false);
 		});
 	}
 
-	// 正视图按钮
 	document.getElementById('viewFrontBtn').addEventListener('click', setViewFront);
-	// 俯视图按钮
 	document.getElementById('viewTopBtn').addEventListener('click', setViewTop);
 	document.getElementById('viewSideBtn').addEventListener('click', setViewSide);
-	// 重置视角时同步输入框
-	const origResetCamera = resetCamera;
-	resetCamera = function() {
-		origResetCamera();
-		const input = document.getElementById('cameraDistInput');
-		if (input && threeCamera) {
-			const dist = threeCamera.position.distanceTo(threeControls.target);
-			input.value = dist.toFixed(1);
-		}
-	};
-	// 覆盖原来的 resetCamera 引用（若需要）
-	window.resetCamera = resetCamera;
 	
 	threeContainer = document.getElementById('threeContainer');
-	// 鼠标移动（更新准星位置，射线检测高亮）
 	threeContainer.addEventListener('pointermove', onPointerMove);
 	threeContainer.addEventListener('pointerdown', onPointerDown);
 	threeContainer.addEventListener('pointerup', onPointerUp);
-	// 键盘事件
+    // ★ 核心修复：补上这两行 3D 键盘监听
 	document.addEventListener('keydown', onKeyDown);
 	document.addEventListener('keyup', onKeyUp);
-	
 	threeContainer.addEventListener('contextmenu', (e) => e.preventDefault());
 	
 	document.getElementById('modePreview').addEventListener('click', () => setInteractionMode('preview'));
 	document.getElementById('modeSelect').addEventListener('click', () => setInteractionMode('select'));
 	document.getElementById('modeEdit').addEventListener('click', () => setInteractionMode('edit'));
 	
-	document.addEventListener('keydown', (e) => {
-		if (e.key === 'p' && state.interactionMode === 'edit') {
-			const cameraPos = threeCamera.position;
-			const { w, l } = state.level.size;
-			const centerX = w / 2;
-			const centerZ = l / 2;
-			// 将相机世界坐标转换为网格坐标（假设地面 y=0）
-			let x = Math.round(cameraPos.x + centerX - 0.5);
-			let z = Math.round(cameraPos.z + centerZ - 0.5);
-			let y = Math.round(cameraPos.y - 0.5); // 高度
-			// 可选：限制在关卡范围内
-			/*x = Math.max(0, Math.min(w - 1, x));
-			z = Math.max(0, Math.min(l - 1, z));
-			y = Math.max(0, Math.min(state.level.size.h - 1, y));*/
-			placeElementAt(state.currentTool, x, z, y);
-		}
-	});
-	
-	// ========== 事件委托（代替每个像素上的独立监听） ==========
+    // 画布交互
+    function processClickAt(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        const gridX = Math.floor(((clientX - rect.left) * (_logicalW / rect.width) - PADDING) / PIXEL_SIZE);
+        const gridY = Math.floor(((clientY - rect.top) * (_logicalH / rect.height) - PADDING) / PIXEL_SIZE);
+        if (gridX < 0 || gridX >= _currentGridW || gridY < 0 || gridY >= _currentGridH) return;
 
-	canvas.addEventListener('click', function(e) {
-        // 添加模式下由 mousedown 负责，click 不再重复放
-        if (state.canvasEditMode === 'add'/* && state.currentTool !== 'eraser'*/) return;
-        // ★ 画笔模式下 mousedown 已经处理过，click 不再重复放
-        if (state.drawMode === 'brush') return;
-		const rect = canvas.getBoundingClientRect();
-        const scaleX = _logicalW / rect.width;
-        const scaleY = _logicalH / rect.height;
-		const mouseX = (e.clientX - rect.left) * scaleX;
-		const mouseY = (e.clientY - rect.top) * scaleY;
-		const pixelSize = PIXEL_SIZE;
-		const padding = PADDING;
-		const gridX = Math.floor((mouseX - padding) / pixelSize);
-		const gridY = Math.floor((mouseY - padding) / pixelSize);
-		const realX = currentMinX + gridX;
-		const realY = currentMinY + gridY;
-		// 获取 staticCoord 和 elemIdsStr
-		const entries = getEntriesAt(realX, realY, state.currentLayer);
-		const elemIds = entries.filter(e => e.type !== 'waypoint').map(e => ({ type: e.type, id: e.id }));
-		const elemIdsStr = elemIds.length > 0 ? JSON.stringify(elemIds) : null;
-		const staticCoord = getStaticCoord(realX, realY, state.currentLayer);
-		handlePixelClick(realX, realY, state.currentLayer, staticCoord, elemIdsStr);
-	});
+        const realX = currentMinX + gridX; const realY = currentMinY + gridY;
+        const entries = getEntriesAt(realX, realY, state.currentLayer);
+        const elemIdsStr = entries.filter(e => e.type !== 'waypoint').length > 0 ? JSON.stringify(entries.filter(e => e.type !== 'waypoint').map(e => ({ type: e.type, id: e.id }))) : null;
+        handlePixelClick(realX, realY, state.currentLayer, getStaticCoord(realX, realY, state.currentLayer), elemIdsStr);
+    }
 
-	// ===== 画笔模式事件（改进） =====
-	// 定义一个处理点击的函数，根据鼠标位置执行点击逻辑
-	function processClickAt(clientX, clientY) {
-		const rect = canvas.getBoundingClientRect();
-        const scaleX = _logicalW / rect.width;
-        const scaleY = _logicalH / rect.height;
-		const mouseX = (clientX - rect.left) * scaleX;
-		const mouseY = (clientY - rect.top) * scaleY;
-		const pixelSize = PIXEL_SIZE;
-		const padding = PADDING;
-		const gridX = Math.floor((mouseX - padding) / pixelSize);
-		const gridY = Math.floor((mouseY - padding) / pixelSize);
-		const realX = currentMinX + gridX;
-		const realY = currentMinY + gridY;
-		// 检查坐标是否在有效范围内（防止负数或超出）
-		if (isNaN(realX) || isNaN(realY)) return;
-		// ===== 新增：检查是否在当前网格范围内 =====
-		if (realX < currentMinX || realX >= currentMinX + _currentGridW || realY < currentMinY || realY >= currentMinY + _currentGridH) {
-			return;
-		}
-		// ===== 新增结束 =====
-		const entries = getEntriesAt(realX, realY, state.currentLayer);
-		const elemIds = entries.filter(e => e.type !== 'waypoint').map(e => ({ type: e.type, id: e.id }));
-		const elemIdsStr = elemIds.length > 0 ? JSON.stringify(elemIds) : null;
-		const staticCoord = getStaticCoord(realX, realY, state.currentLayer);
-		handlePixelClick(realX, realY, state.currentLayer, staticCoord, elemIdsStr);
-	}
+    let _longPressTimer = null, _longPressDelayTimer = null;
+    let _longPressPos = { x: 0, y: 0 }, _longPressCell = { x: NaN, y: NaN };
 
-    let _longPressTimer = null;
-    let _longPressDelayTimer = null;
-    let _longPressPos = { x: 0, y: 0 };
-    let _longPressCell = { x: NaN, y: NaN };
+    canvas.addEventListener('click', function(e) {
+        // 记录点击位置
+        window._lastMouseClickX = e.clientX;
+        window._lastMouseClickY = e.clientY;
+        if (state.canvasEditMode === 'add' || state.drawMode === 'brush') return;
+        const rect = canvas.getBoundingClientRect();
+        const gridX = Math.floor(((e.clientX - rect.left) * (_logicalW / rect.width) - PADDING) / PIXEL_SIZE);
+        const gridY = Math.floor(((e.clientY - rect.top) * (_logicalH / rect.height) - PADDING) / PIXEL_SIZE);
+        if (gridX < 0 || gridX >= _currentGridW || gridY < 0 || gridY >= _currentGridH) return;
+        window._lastEvent = e; // 保存当前事件用于弹窗定位
+        const realX = currentMinX + gridX; const realY = currentMinY + gridY;
+        const entries = getEntriesAt(realX, realY, state.currentLayer);
+        const elemIdsStr = entries.filter(e => e.type !== 'waypoint').length > 0 ? JSON.stringify(entries.filter(e => e.type !== 'waypoint').map(e => ({ type: e.type, id: e.id }))) : null;
+        handlePixelClick(realX, realY, state.currentLayer, getStaticCoord(realX, realY, state.currentLayer), elemIdsStr);
+    });
 
     canvas.addEventListener('mousedown', function(e) {
-        if (state.canvasEditMode === 'add'/* && state.currentTool !== 'eraser'*/) {
-            state._addSessionActive = true;
-            state._addSessionRecorded = false;
+        window._lastMouseClickX = e.clientX; // 提前记录
+        window._lastMouseClickY = e.clientY;
+        if (state.canvasEditMode === 'add') {
+            state._addSessionActive = true; state._addSessionRecorded = false;
             _longPressPos = { x: e.clientX, y: e.clientY };
-
-            // 记录起始格子
             const rect = canvas.getBoundingClientRect();
-            const scaleX = _logicalW / rect.width;
-            const scaleY = _logicalH / rect.height;
-            const gx = Math.floor(((e.clientX - rect.left) * scaleX - PADDING) / PIXEL_SIZE);
-            const gy = Math.floor(((e.clientY - rect.top) * scaleY - PADDING) / PIXEL_SIZE);
-            _longPressCell = { x: currentMinX + gx, y: currentMinY + gy };
-
-            // 立即放一个
+            _longPressCell = { x: currentMinX + Math.floor(((e.clientX - rect.left) * (_logicalW / rect.width) - PADDING) / PIXEL_SIZE), y: currentMinY + Math.floor(((e.clientY - rect.top) * (_logicalH / rect.height) - PADDING) / PIXEL_SIZE) };
             processClickAt(e.clientX, e.clientY);
-
-            // 启动 1 秒延时
-            clearTimeout(_longPressDelayTimer);
-            clearInterval(_longPressTimer);
-            _longPressTimer = null;
-            _longPressDelayTimer = setTimeout(() => {
-                _longPressTimer = setInterval(() => {
-                    processClickAt(_longPressPos.x, _longPressPos.y);
-                }, 400);
-            }, 1000);
-
+            clearTimeout(_longPressDelayTimer); clearInterval(_longPressTimer); _longPressTimer = null;
+            _longPressDelayTimer = setTimeout(() => { _longPressTimer = setInterval(() => processClickAt(_longPressPos.x, _longPressPos.y), 400); }, 1000);
             return;
         }
-
         if (state.drawMode !== 'brush') return;
-        state.isDrawing = true;
-        state._brushSessionActive = true;
-        state._brushSessionRecorded = false;
-        _lastBrushPos = null;
-        processClickAt(e.clientX, e.clientY);
+        state.isDrawing = true; state._brushSessionActive = true; state._brushSessionRecorded = false;
+        _lastBrushPos = null; processClickAt(e.clientX, e.clientY);
     });
 
-	// 鼠标移动：如果正在绘制且为画笔模式，持续绘制
-	canvas.addEventListener('mousemove', function(e) {
-        // 添加模式：更新位置 + 重置 1 秒延时
+    canvas.addEventListener('mousemove', function(e) {
+        const rect = canvas.getBoundingClientRect();
+        const gridX = Math.floor(((e.clientX - rect.left) * (_logicalW / rect.width) - PADDING) / PIXEL_SIZE);
+        const gridY = Math.floor(((e.clientY - rect.top) * (_logicalH / rect.height) - PADDING) / PIXEL_SIZE);
+        if (gridX < 0 || gridX >= _currentGridW || gridY < 0 || gridY >= _currentGridH) {
+            mouseCoord.textContent = '( -, - )';
+            if (state._addSessionActive) { clearTimeout(_longPressDelayTimer); clearInterval(_longPressTimer); _longPressDelayTimer = null; _longPressTimer = null; }
+            return;
+        }
+        const realX = currentMinX + gridX; const realY = currentMinY + gridY;
+        mouseCoord.textContent = `(${realX}, ${realY}, ${state.currentLayer})`;
+
         if (state._addSessionActive) {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = _logicalW / rect.width;
-            const scaleY = _logicalH / rect.height;
-            const gx = Math.floor(((e.clientX - rect.left) * scaleX - PADDING) / PIXEL_SIZE);
-            const gy = Math.floor(((e.clientY - rect.top) * scaleY - PADDING) / PIXEL_SIZE);
-            const realX = currentMinX + gx;
-            const realY = currentMinY + gy;
-
-            if (!isNaN(realX) && !isNaN(realY)) {
-                mouseCoord.textContent = `(${realX}, ${realY}, ${state.currentLayer})`;
-            }
-
-            // 进入新格子就立即放一个（画笔行为）
             if (realX !== _longPressCell.x || realY !== _longPressCell.y) {
-                _longPressCell = { x: realX, y: realY };
-                _longPressPos = { x: e.clientX, y: e.clientY };
+                _longPressCell = { x: realX, y: realY }; _longPressPos = { x: e.clientX, y: e.clientY };
                 processClickAt(e.clientX, e.clientY);
-            } else {
-                // 同格内移动只更新光标位置
-                _longPressPos = { x: e.clientX, y: e.clientY };
-            }
-
-            // 每次移动都重置 1 秒延时
-            clearTimeout(_longPressDelayTimer);
-            clearInterval(_longPressTimer);
-            _longPressTimer = null;
-            _longPressDelayTimer = setTimeout(() => {
-                _longPressTimer = setInterval(() => {
-                    processClickAt(_longPressPos.x, _longPressPos.y);
-                }, 300);
-            }, 1000);
-
+            } else _longPressPos = { x: e.clientX, y: e.clientY };
+            clearTimeout(_longPressDelayTimer); clearInterval(_longPressTimer); _longPressTimer = null;
+            _longPressDelayTimer = setTimeout(() => { _longPressTimer = setInterval(() => processClickAt(_longPressPos.x, _longPressPos.y), 300); }, 1000);
             return;
         }
-
-		const rect = canvas.getBoundingClientRect();
-        const scaleX = _logicalW / rect.width;
-        const scaleY = _logicalH / rect.height;
-		const mouseX = (e.clientX - rect.left) * scaleX;
-		const mouseY = (e.clientY - rect.top) * scaleY;
-		const pixelSize = PIXEL_SIZE;
-		const padding = PADDING;
-		const gridX = Math.floor((mouseX - padding) / pixelSize);
-		const gridY = Math.floor((mouseY - padding) / pixelSize);
-		const realX = currentMinX + gridX;
-		const realY = currentMinY + gridY;
-		
-		// 更新坐标显示
-		if (!isNaN(realX) && !isNaN(realY)) {
-			mouseCoord.textContent = `(${realX}, ${realY}, ${state.currentLayer})`;
-		} else {
-			mouseCoord.textContent = '( -, - )';
-		}
-		
-		// 画笔模式绘制（增加位置去重）
-		if (state.isDrawing && state.drawMode === 'brush') {
-			if (_lastBrushPos && _lastBrushPos.x === realX && _lastBrushPos.y === realY) {
-				return;
-			}
-			_lastBrushPos = { x: realX, y: realY };
-			processClickAt(e.clientX, e.clientY);
-		}
-	});
-
-	// 鼠标松开：结束绘制
-    canvas.addEventListener('mouseup', function(e) {
-        // 添加模式：清掉所有计时器
-        if (state._addSessionActive) {
-            clearTimeout(_longPressDelayTimer);
-            clearInterval(_longPressTimer);
-            _longPressDelayTimer = null;
-            _longPressTimer = null;
-            state._addSessionActive = false;
-            state._addSessionRecorded = false;
-            return;
+        if (state.isDrawing && state.drawMode === 'brush') {
+            if (_lastBrushPos && _lastBrushPos.x === realX && _lastBrushPos.y === realY) return;
+            _lastBrushPos = { x: realX, y: realY }; processClickAt(e.clientX, e.clientY);
         }
-
-        // 原有画笔逻辑
-        state.isDrawing = false;
-        state._brushSessionActive = false;
-        state._brushSessionRecorded = false;
-        _lastBrushPos = null;
     });
 
-	// 鼠标离开画布：清除绘制状态和坐标显示
-    canvas.addEventListener('mouseleave', function() {
-        if (state._addSessionActive) {
-            clearTimeout(_longPressDelayTimer);
-            clearInterval(_longPressTimer);
-            _longPressDelayTimer = null;
-            _longPressTimer = null;
-            state._addSessionActive = false;
-            state._addSessionRecorded = false;
-        }
-        state.isDrawing = false;
-        state._brushSessionActive = false;
-        state._brushSessionRecorded = false;
-        _lastBrushPos = null;
-        mouseCoord.textContent = '( -, - )';
-    });
+    function handleCanvasLeave() {
+        if (state._addSessionActive) { clearTimeout(_longPressDelayTimer); clearInterval(_longPressTimer); _longPressDelayTimer = null; _longPressTimer = null; state._addSessionActive = false; }
+        state.isDrawing = false; state._brushSessionActive = false; _lastBrushPos = null; mouseCoord.textContent = '( -, - )';
+    }
+    canvas.addEventListener('mouseup', handleCanvasLeave);
+    canvas.addEventListener('mouseleave', handleCanvasLeave);
 
-	// 触摸事件（移动端支持）
-	canvas.addEventListener('touchstart', function(e) {
-		if (state.drawMode !== 'brush') return;
-		e.preventDefault();
-		state.isDrawing = true;
-        state._brushSessionActive = true;      // ← 新增
-        state._brushSessionRecorded = false;   // ← 新增
-		_lastBrushPos = null;
-		const touch = e.touches[0];
-		processClickAt(touch.clientX, touch.clientY);
-	}, { passive: false });
+    canvas.addEventListener('touchstart', function(e) {
+        if (state.drawMode !== 'brush') return;
+        e.preventDefault(); state.isDrawing = true; state._brushSessionActive = true; _lastBrushPos = null; processClickAt(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+    canvas.addEventListener('touchmove', function(e) {
+        if (!state.isDrawing || state.drawMode !== 'brush') return;
+        e.preventDefault(); const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const gridX = Math.floor(((touch.clientX - rect.left) * (_logicalW / rect.width) - PADDING) / PIXEL_SIZE);
+        const gridY = Math.floor(((touch.clientY - rect.top) * (_logicalH / rect.height) - PADDING) / PIXEL_SIZE);
+        if (gridX < 0 || gridX >= _currentGridW || gridY < 0 || gridY >= _currentGridH) return;
+        const realX = currentMinX + gridX; const realY = currentMinY + gridY;
+        if (_lastBrushPos && _lastBrushPos.x === realX && _lastBrushPos.y === realY) return;
+        _lastBrushPos = { x: realX, y: realY }; processClickAt(touch.clientX, touch.clientY);
+    }, { passive: false });
+    canvas.addEventListener('touchend', () => handleCanvasLeave());
 
-	canvas.addEventListener('touchmove', function(e) {
-		if (!state.isDrawing || state.drawMode !== 'brush') return;
-		e.preventDefault();
-		const touch = e.touches[0];
-		const rect = canvas.getBoundingClientRect();
-        const scaleX = _logicalW / rect.width;
-        const scaleY = _logicalH / rect.height;
-		const mouseX = (touch.clientX - rect.left) * scaleX;
-		const mouseY = (touch.clientY - rect.top) * scaleY;
-		const pixelSize = PIXEL_SIZE;
-		const padding = PADDING;
-		const gridX = Math.floor((mouseX - padding) / pixelSize);
-		const gridY = Math.floor((mouseY - padding) / pixelSize);
-		const realX = currentMinX + gridX;
-		const realY = currentMinY + gridY;
-		// 位置去重
-		if (_lastBrushPos && _lastBrushPos.x === realX && _lastBrushPos.y === realY) {
-			return;
-		}
-		_lastBrushPos = { x: realX, y: realY };
-		processClickAt(touch.clientX, touch.clientY);
-	}, { passive: false });
-
-	canvas.addEventListener('touchend', function(e) {
-		state.isDrawing = false;
-        state._brushSessionActive = false;     // ← 新增
-        state._brushSessionRecorded = false;   // ← 新增
-		_lastBrushPos = null;
-	});
-
-	const gridWrapper = document.getElementById('gridWrapper');
-	if (gridWrapper) {
-		gridWrapper.style.cssText = 
-			'display:flex; justify-content:flex-start; align-items:flex-start; ' +
-			'flex-shrink:0; position:relative; overflow:visible; ' +
-			'width:auto; height:auto;';
-	}
-
-	// ===== 鼠标移动：更新坐标 + 画笔模式绘制 =====
-	canvas.addEventListener('mousemove', function(e) {
-		const rect = canvas.getBoundingClientRect();
-        const scaleX = _logicalW / rect.width;
-        const scaleY = _logicalH / rect.height;
-		const mouseX = (e.clientX - rect.left) * scaleX;
-		const mouseY = (e.clientY - rect.top) * scaleY;
-		const pixelSize = PIXEL_SIZE;
-		const padding = PADDING;
-		const gridX = Math.floor((mouseX - padding) / pixelSize);
-		const gridY = Math.floor((mouseY - padding) / pixelSize);
-		const realX = currentMinX + gridX;
-		const realY = currentMinY + gridY;
-		
-		// 更新坐标显示
-		if (!isNaN(realX) && !isNaN(realY)) {
-			mouseCoord.textContent = `(${realX}, ${realY}, ${state.currentLayer})`;
-		} else {
-			mouseCoord.textContent = '( -, - )';
-		}
-		
-		// 画笔模式：鼠标按下并移动时持续绘制
-		if (state.isDrawing && state.drawMode === 'brush') {
-			// 直接触发点击事件，坐标由 click 事件重新计算
-			// 但为了准确，传递当前鼠标位置
-			const clickEvent = new MouseEvent('click', {
-				clientX: e.clientX,
-				clientY: e.clientY,
-			});
-			canvas.dispatchEvent(clickEvent);
-		}
-	});
-
-	// 鼠标离开画布时清除坐标显示
-	canvas.addEventListener('mouseleave', function() {
-		mouseCoord.textContent = '( -, - )';
-	});
-
-	canvas.addEventListener('mouseleave', function() {
-		mouseCoord.textContent = '( -, - )';
-	});
-	//canvas.style.imageRendering = 'crisp-edges';   // 'pixelated'或 'crisp-edges'
-	canvas.style.transformOrigin = '0 0';
-	canvas.style.position = 'absolute';
-	canvas.style.top = '0';
-	canvas.style.left = '0';
-	
-	document.getElementById('elemFilterSelect').addEventListener('change', function() {
-		updateElemList();
-	});
+	document.getElementById('elemFilterSelect').addEventListener('change', updateElemList);
 
 	(function initLevelPropsToggle() {
-		const btn = document.getElementById('toggleLevelPropsBtn');
-		const area = document.getElementById('levelPropsArea');
+		const btn = document.getElementById('toggleLevelPropsBtn'), area = document.getElementById('levelPropsArea');
 		if (!btn || !area) return;
-
 		const STORAGE_KEY = 'level_props_collapsed';
-
-		function applyState(collapsed) {
-			area.classList.toggle('collapsed', collapsed);
-			btn.textContent = collapsed ? '▼' : '▲';
-			btn.title = collapsed ? '展开 Level 属性' : '折叠 Level 属性';
-		}
-
-		// 从 localStorage 恢复上次状态
-		let saved = false;
-		try {
-			saved = localStorage.getItem(STORAGE_KEY) === 'true';
-		} catch (e) {}
-		applyState(saved);
-
+		function applyState(collapsed) { area.classList.toggle('collapsed', collapsed); btn.textContent = collapsed ? '▼' : '▲'; }
+		try { applyState(localStorage.getItem(STORAGE_KEY) === 'true'); } catch (e) {}
 		btn.addEventListener('click', function() {
 			const collapsed = !area.classList.contains('collapsed');
-			applyState(collapsed);
-			try {
-				localStorage.setItem(STORAGE_KEY, String(collapsed));
-			} catch (e) {}
+			applyState(collapsed); try { localStorage.setItem(STORAGE_KEY, String(collapsed)); } catch (e) {}
 		});
 	})();
     
     (function enableLiveLevelProps() {
-        const area = document.getElementById('levelPropsArea');
-        if (!area) return;
-        const applyLive = (() => {
-            let t = null;
-            return () => {
-                clearTimeout(t);
-                t = setTimeout(() => {
-                    try { applyLevel(); } catch (e) { /* 忽略中间态 */ }
-                }, 150);
-            };
-        })();
-        area.querySelectorAll('input').forEach(el => {
-            const isSize = ['sizeW','sizeL','sizeH'].includes(el.id);
-            el.addEventListener(isSize ? 'change' : 'input', applyLive);
-        });
+        const area = document.getElementById('levelPropsArea'); if (!area) return;
+        const applyLive = (() => { let t = null; return () => { clearTimeout(t); t = setTimeout(() => { try { applyLevel(); } catch (e) {} }, 150); }; })();
+        area.querySelectorAll('input').forEach(el => { el.addEventListener(['sizeW','sizeL','sizeH'].includes(el.id) ? 'change' : 'input', applyLive); });
     })();
     
-    // ===== 设置面板 =====
+    // 设置面板
     (function initSettingsPanel() {
-        const dlg = document.getElementById('settingsDialog');
-        const btn = document.getElementById('settingsBtn');
+        const dlg = document.getElementById('settingsDialog'); const btn = document.getElementById('settingsBtn');
         if (!dlg || !btn) return;
 
-        function syncFromState() {
-            document.getElementById('settingUseShareDownload').checked =
-                !!state.settings.useShareDownload;
-            document.getElementById('settingMsIncludeEmpty').checked =
-                !!state.settings.msIncludeEmpty;
-            document.getElementById('settingPasteOverwrite').checked =
-                !!state.settings.pasteOverwrite;
-            document.getElementById('settingImportNewProject').checked =
-                !!state.settings.importNewProject;
-                
-            document.getElementById('settingAutoSave').checked = state.settings.autoSave !== false;
-            // ★ 处理自动保存间隔的回显
-            const interval = state.settings.autoSaveInterval || 0;
-            const selectEl = document.getElementById('settingAutoSaveInterval');
-            const customWrap = document.getElementById('customIntervalWrap');
-            const customInput = document.getElementById('settingAutoSaveCustom');
+        // 1. 动态注入分块设置，并插入到自动保存后面
+        let settingsBody = dlg.querySelector('.modal-body') || dlg.querySelector('div');
+        if (settingsBody && !document.getElementById('settingChunkThreshold')) {
+            const div = document.createElement('div');
+            div.className = 'field-row';
+            div.style = 'padding-top: 8px; margin-top: 8px; display: flex; gap: 16px; flex-wrap: wrap;';
+            div.innerHTML = `
+                <label class="chk">开启分块阈值：
+                    <input type="number" id="settingChunkThreshold" min="100" max="10000" value="500" style="width:70px;"> 格
+                </label>
+                <label class="chk">区块大小：
+                    <input type="number" id="settingChunkSize" min="20" max="500" value="100" style="width:70px;"> 格
+                </label>
+            `;
             
-            if ([0, 60, 300].includes(interval)) {
-                selectEl.value = String(interval);
-                customWrap.style.display = 'none';
+            // ★ 核心：找到"导出目录"这一行，插在它后面
+            const exportRow = document.getElementById('settingExportDir')?.closest('.field-row') || document.getElementById('settingExportDir')?.parentElement;
+            if (exportRow && exportRow.parentElement) {
+                exportRow.parentElement.insertBefore(div, exportRow.nextSibling);
             } else {
-                selectEl.value = '-1';
-                customWrap.style.display = 'flex';
-                customInput.value = Math.floor(interval / 60) || 1;
+                settingsBody.appendChild(div);
             }
-            document.getElementById('settingEnableCompression').checked = state.settings.enableCompression !== false; // ★
-            // ★ 新增：回显路径
-            document.getElementById('settingGamePath').value = state.settings.gamePath || '';
-            // ★ 新增：回显导出路径
-            document.getElementById('settingUseCustomExportDir').checked = !!state.settings.useCustomExportDir;
-            document.getElementById('settingExportDir').value = state.settings.customExportPath || '';
-            document.getElementById('settingExportDir').disabled = !state.settings.useCustomExportDir;
-            document.getElementById('settingExportDirBtn').disabled = !state.settings.useCustomExportDir;
+
+            document.getElementById('settingChunkThreshold').addEventListener('change', function() {
+                let v = Math.max(100, parseInt(this.value) || 500); state.settings.chunkThreshold = v; this.value = v;
+                saveSettingsOnly(); updateCanvasRangeFromSize(); requestRender();
+            });
+            document.getElementById('settingChunkSize').addEventListener('change', function() {
+                let v = Math.max(20, parseInt(this.value) || 100); state.settings.chunkSize = v; this.value = v;
+                state.currentChunk = { x: 0, y: 0 }; saveSettingsOnly(); updateCanvasRangeFromSize(); requestRender();
+            });
+        }
+
+        function syncFromState() {
+            const safeSet = (id, val) => { const el = document.getElementById(id); if (el) el.checked = val; };
+            const safeVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+            
+            safeSet('settingUseShareDownload', !!state.settings.useShareDownload);
+            safeSet('settingMsIncludeEmpty', !!state.settings.msIncludeEmpty);
+            safeSet('settingPasteOverwrite', !!state.settings.pasteOverwrite);
+            safeSet('settingImportNewProject', !!state.settings.importNewProject);
+            safeSet('settingAutoSave', state.settings.autoSave !== false);
+            safeSet('settingEnableCompression', state.settings.enableCompression !== false);
+            
+            const interval = state.settings.autoSaveInterval || 0;
+            const selectEl = document.getElementById('settingAutoSaveInterval'); const customWrap = document.getElementById('customIntervalWrap');
+            if (selectEl && customWrap) {
+                if ([0, 60, 300].includes(interval)) { selectEl.value = String(interval); customWrap.style.display = 'none'; }
+                else { selectEl.value = '-1'; customWrap.style.display = 'flex'; safeVal('settingAutoSaveCustom', Math.floor(interval / 60) || 1); }
+            }
+            safeVal('settingGamePath', state.settings.gamePath || '');
+            safeSet('settingUseCustomExportDir', !!state.settings.useCustomExportDir);
+            safeVal('settingExportDir', state.settings.customExportPath || '');
+            
+            const dirInput = document.getElementById('settingExportDir'); const dirBtn = document.getElementById('settingExportDirBtn');
+            if (dirInput && dirBtn) { dirInput.disabled = !state.settings.useCustomExportDir; dirBtn.disabled = !state.settings.useCustomExportDir; }
+            safeVal('settingChunkThreshold', state.settings.chunkThreshold || 500);
+            safeVal('settingChunkSize', state.settings.chunkSize || 100);
             toggleAutoSaveUI();
         }
         
         function toggleAutoSaveUI() {
-            const isAuto = document.getElementById('settingAutoSave').checked;
-            const selectEl = document.getElementById('settingAutoSaveInterval');
-            const intervalVal = parseInt(selectEl.value, 10);
-            
-            selectEl.disabled = !isAuto;
-            
-            // 联动自定义输入框
-            document.getElementById('customIntervalWrap').style.display = 
-                (!isAuto || selectEl.value !== '-1') ? 'none' : 'flex';
-            
-            // ★ 修复：只有「开启自动保存」且「实时保存(间隔为0)」时，才隐藏保存按钮
+            const autoSaveEl = document.getElementById('settingAutoSave'); if (!autoSaveEl) return;
+            const isAuto = autoSaveEl.checked; const selectEl = document.getElementById('settingAutoSaveInterval'); if (!selectEl) return;
+            const intervalVal = parseInt(selectEl.value, 10); selectEl.disabled = !isAuto;
+            const customWrap = document.getElementById('customIntervalWrap');
+            if (customWrap) customWrap.style.display = (!isAuto || selectEl.value !== '-1') ? 'none' : 'flex';
             const manualBtn = document.getElementById('manualSaveBtn');
-            if (manualBtn) {
-                if (isAuto && intervalVal === 0) {
-                    manualBtn.style.display = 'none';
-                } else {
-                    manualBtn.style.display = 'inline-block';
-                }
-            }
-        }
-        document.getElementById('settingAutoSave').addEventListener('change', function () {
-            state.settings.autoSave = this.checked;
-            toggleAutoSaveUI();
-            saveSettingsOnly();
-            if (this.checked) saveCache(); // 如果开启了，顺便存一下当前关卡
-        });
-        
-        // ★ 监听下拉框变化
-        document.getElementById('settingAutoSaveInterval').addEventListener('change', function () {
-            if (this.value === '-1') {
-                document.getElementById('customIntervalWrap').style.display = 'flex';
-                const m = parseInt(document.getElementById('settingAutoSaveCustom').value) || 10;
-                state.settings.autoSaveInterval = m * 60;
-            } else {
-                document.getElementById('customIntervalWrap').style.display = 'none';
-                state.settings.autoSaveInterval = parseInt(this.value, 10) || 0;
-            }
-            toggleAutoSaveUI();
-            saveSettingsOnly();
-        });
-
-        // ★ 监听自定义输入框变化
-        document.getElementById('settingAutoSaveCustom').addEventListener('change', function() {
-            let m = parseInt(this.value, 10) || 10;
-            if (m < 1) m = 1;
-            this.value = m;
-            state.settings.autoSaveInterval = m * 60;
-            saveSettingsOnly();
-        });
-
-        // ★ 绑定压缩开关
-        document.getElementById('settingEnableCompression').addEventListener('change', function () {
-            state.settings.enableCompression = this.checked;
-            saveSettingsOnly();
-        });
-
-        // ★ 绑定手动保存按钮
-        const manualBtn = document.getElementById('manualSaveBtn');
-        if (manualBtn) {
-            manualBtn.addEventListener('click', () => {
-                if (typeof doRealSaveCache === 'function') {
-                    doRealSaveCache();
-                    state._hasUnsavedChanges = false;
-                    showToast('✅ 已手动保存到本地');
-                }
-            });
+            if (manualBtn) manualBtn.style.display = (isAuto && intervalVal === 0) ? 'none' : 'inline-block';
         }
 
-        btn.addEventListener('click', () => {
-            syncFromState();
-            dlg.style.display = 'flex';
-        });
+        btn.addEventListener('click', () => { syncFromState(); dlg.style.display = 'flex'; });
         window.closeSettingsDialog = () => { dlg.style.display = 'none'; };
         dlg.addEventListener('click', e => { if (e.target === dlg) dlg.style.display = 'none'; });
 
-        document.getElementById('settingUseShareDownload').addEventListener('change', function () {
-            state.settings.useShareDownload = this.checked;
-            saveSettingsOnly();
+        const safeBind = (id, event, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(event, fn); };
+        safeBind('settingAutoSave', 'change', function () { state.settings.autoSave = this.checked; toggleAutoSaveUI(); saveSettingsOnly(); if (this.checked) saveCache(); });
+        safeBind('settingAutoSaveInterval', 'change', function () {
+            const customWrap = document.getElementById('customIntervalWrap');
+            if (this.value === '-1') { if (customWrap) customWrap.style.display = 'flex'; state.settings.autoSaveInterval = (parseInt(document.getElementById('settingAutoSaveCustom')?.value) || 10) * 60; }
+            else { if (customWrap) customWrap.style.display = 'none'; state.settings.autoSaveInterval = parseInt(this.value, 10) || 0; }
+            toggleAutoSaveUI(); saveSettingsOnly();
         });
-
-        document.getElementById('settingMsIncludeEmpty').addEventListener('change', function () {
-            state.settings.msIncludeEmpty = this.checked;
-            saveSettingsOnly();
-        });
-
-        document.getElementById('settingPasteOverwrite').addEventListener('change', function () {
-            state.settings.pasteOverwrite = this.checked;
-            // 同步给 QuickFill（它内部有一份 cb.overwrite）
-            if (window.QuickFill && window.QuickFill.setOverwrite) {
-                window.QuickFill.setOverwrite(this.checked);
-            }
-            saveSettingsOnly();
-        });
-
-        document.getElementById('settingImportNewProject').addEventListener('change', function () {
-            state.settings.importNewProject = this.checked;
-            saveSettingsOnly();
-        });
-        
-        // ★ 新增：保存路径的绑定
-        document.getElementById('settingGamePath').addEventListener('change', function () {
-            state.settings.gamePath = this.value.trim();
-            saveSettingsOnly(); // 使用只保存设置的方法
-        });
-        // ★ 新增：统一导出路径的绑定
-        document.getElementById('settingUseCustomExportDir').addEventListener('change', function () {
+        safeBind('settingAutoSaveCustom', 'change', function() { let m = Math.max(1, parseInt(this.value, 10) || 10); this.value = m; state.settings.autoSaveInterval = m * 60; saveSettingsOnly(); });
+        safeBind('settingEnableCompression', 'change', function () { state.settings.enableCompression = this.checked; saveSettingsOnly(); });
+        safeBind('settingUseShareDownload', 'change', function () { state.settings.useShareDownload = this.checked; saveSettingsOnly(); });
+        safeBind('settingMsIncludeEmpty', 'change', function () { state.settings.msIncludeEmpty = this.checked; saveSettingsOnly(); });
+        safeBind('settingPasteOverwrite', 'change', function () { state.settings.pasteOverwrite = this.checked; if (window.QuickFill?.setOverwrite) window.QuickFill.setOverwrite(this.checked); saveSettingsOnly(); });
+        safeBind('settingImportNewProject', 'change', function () { state.settings.importNewProject = this.checked; saveSettingsOnly(); });
+        safeBind('settingGamePath', 'change', function () { state.settings.gamePath = this.value.trim(); saveSettingsOnly(); });
+        safeBind('settingUseCustomExportDir', 'change', function () {
             state.settings.useCustomExportDir = this.checked;
-            document.getElementById('settingExportDir').disabled = !this.checked;
-            document.getElementById('settingExportDirBtn').disabled = !this.checked;
+            const dirInput = document.getElementById('settingExportDir'); const dirBtn = document.getElementById('settingExportDirBtn');
+            if (dirInput) dirInput.disabled = !this.checked; if (dirBtn) dirBtn.disabled = !this.checked;
             saveSettingsOnly();
         });
-        document.getElementById('settingExportDir').addEventListener('change', function () {
-            state.settings.customExportPath = this.value.trim();
-            saveSettingsOnly();
-        });
-    })();
-    
-    // ★ 从 state 恢复工具栏勾选状态
-    (function restoreToolbarCheckboxes() {
-        const keepCb  = document.getElementById('keepPrevProps');
-        const autoCb  = document.getElementById('autoNameCheck');
-        const addCb   = document.getElementById('canvasAddMode');
-
-        if (keepCb) keepCb.checked = !!state.keepPrevProps;
-        if (autoCb) autoCb.checked = !!state.autoName;
-        if (addCb)  addCb.checked  = (state.canvasEditMode === 'add');
-
-        if (keepCb) keepCb.addEventListener('change', function () {
-            state.keepPrevProps = this.checked;
-            saveCache();
-        });
-        if (autoCb) autoCb.addEventListener('change', function () {
-            state.autoName = this.checked;
-            saveCache();
-        });
-        // canvasAddMode 已经有自己的 change handler 调 setCanvasEditMode，
-        // 只要 setCanvasEditMode 里 saveCache 一下就行（见 1.5）
+        safeBind('settingExportDir', 'change', function () { state.settings.customExportPath = this.value.trim(); saveSettingsOnly(); });
+        safeBind('manualSaveBtn', 'click', () => { if (typeof doRealSaveCache === 'function') { doRealSaveCache(); state._hasUnsavedChanges = false; showToast('✅ 已手动保存到本地'); } });
     })();
 
-	state._lastSavedSnapshot = _serializeHistory();
-    state._undoStack = [];
-    state._redoStack = [];
-    
-    document.addEventListener('keydown', function(e) {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
-        const isMac = navigator.platform.toUpperCase().includes('MAC');
-        const ctrl = isMac ? e.metaKey : e.ctrlKey;
-        if (ctrl && !e.shiftKey && e.key.toLowerCase() === 'z') {
-            e.preventDefault();
-            undo();
-        } else if ((ctrl && e.shiftKey && e.key.toLowerCase() === 'z') ||
-                   (ctrl && e.key.toLowerCase() === 'y')) {
-            e.preventDefault();
-            redo();
+    // ★ 动态注入小地图
+    (function initMiniMap() {
+        if (!document.getElementById('miniMapPanel')) {
+            const defaultLeft = window.innerWidth - 500;
+            const defaultTop = window.innerHeight - 250;
+            
+            document.body.insertAdjacentHTML('beforeend', `
+                <div id="miniMapPanel" style="position: fixed; left: ${defaultLeft}px; top: ${defaultTop}px; background: var(--bg-panel); border: 1px solid var(--border-strong); box-shadow: var(--shadow-modal); z-index: 999; display: flex; flex-direction: column; touch-action: none;">
+                    <div id="miniMapHeader" style="padding: 4px 8px; background: var(--bg-toolbar); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; cursor: move;">
+                        <span style="font-size: 11px; font-weight: bold; color: var(--text-dim);">🗺️ 小地图</span>
+                        <span style="font-size: 10px; color: var(--text-faint); cursor:pointer;" onclick="document.getElementById('miniMapBody').style.display = document.getElementById('miniMapBody').style.display === 'none' ? 'flex' : 'none';">折叠</span>
+                    </div>
+                    <div id="miniMapBody" style="padding: 8px; display: flex; flex-direction: column; gap: 8px;">
+                        <canvas id="miniMapCanvas" width="150" height="150" style="background: #0a0a1a; cursor: crosshair; border: 1px solid var(--border); touch-action: none;"></canvas>
+                        
+                        <!-- ★ 新增：控制栏 -->
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-dim);">
+                            <div style="display:flex; align-items:center; gap:4px;">
+                                倍数:<input type="number" id="miniMapZoomInput" value="${state.settings.miniMapZoom || 1}" min="0.1" max="50" step="0.1" style="width:45px; height:18px; padding:0 2px; font-size:11px;">
+                            </div>
+                            <button id="miniMapLocateBtn" class="btn-sm" style="height:20px; padding:0 6px;">📍 定位红框</button>
+                        </div>
+                        
+                        <div style="font-size:10px; color:var(--text-faint); text-align:center;">左键切块 | 右键平移</div>
+                        <label style="font-size:11px; color:var(--text); display:flex; align-items:center; gap:4px; cursor:pointer;">
+                            <input type="checkbox" id="miniMapAutoJump" ${state.settings.autoJumpChunk !== false ? 'checked' : ''}> 选元素自动跳块
+                        </label>
+                        <label style="font-size:11px; color:var(--text); display:flex; align-items:center; gap:4px; cursor:pointer;">
+                            <input type="checkbox" id="miniMapAutoJumpLayer" ${state.settings.autoJumpLayer ? 'checked' : ''}> 选元素自动跳层
+                        </label>
+                    </div>
+                </div>
+            `);
+
+            document.getElementById('miniMapAutoJump').addEventListener('change', function() {
+                state.settings.autoJumpChunk = this.checked;
+                saveSettingsOnly();
+            });
+            document.getElementById('miniMapAutoJumpLayer').addEventListener('change', function() {
+                state.settings.autoJumpLayer = this.checked;
+                saveSettingsOnly();
+            });
+
+            // 拖拽面板
+            const panel = document.getElementById('miniMapPanel');
+            const header = document.getElementById('miniMapHeader');
+            let isDraggingPanel = false, pStartX, pStartY, pStartLeft, pStartTop;
+
+            header.addEventListener('pointerdown', (e) => {
+                if (e.target.tagName === 'SPAN' && e.target.textContent === '折叠') return;
+                isDraggingPanel = true;
+                pStartX = e.clientX; pStartY = e.clientY;
+                pStartLeft = parseInt(panel.style.left) || 0;
+                pStartTop = parseInt(panel.style.top) || 0;
+                header.setPointerCapture(e.pointerId);
+                e.preventDefault();
+            });
+            header.addEventListener('pointermove', (e) => {
+                if (!isDraggingPanel) return;
+                panel.style.left = (pStartLeft + e.clientX - pStartX) + 'px';
+                panel.style.top = (pStartTop + e.clientY - pStartY) + 'px';
+            });
+            header.addEventListener('pointerup', (e) => {
+                isDraggingPanel = false;
+                header.releasePointerCapture(e.pointerId);
+            });
+
+            // ★ 输入框手动调整倍数
+            const zoomInput = document.getElementById('miniMapZoomInput');
+            zoomInput.addEventListener('change', function() {
+                let val = parseFloat(this.value);
+                if (isNaN(val) || val < 0.1) val = 0.1;
+                if (val > 50) val = 50;
+                this.value = val;
+                state.settings.miniMapZoom = val;
+                // 重置平移，让视图居中
+                state.settings.miniMapPanX = 0;
+                state.settings.miniMapPanY = 0;
+                saveSettingsOnly();
+                requestRender();
+            });
+
+            // ★ 定位红框按钮（改为让小地图以红框为中心显示）
+            document.getElementById('miniMapLocateBtn').addEventListener('click', () => {
+                const chunkSize = state.settings.chunkSize || 100;
+                const cMinX = state.currentChunk.x * chunkSize;
+                const cMinY = state.currentChunk.y * chunkSize;
+                // 红框中心坐标
+                const cx = cMinX + chunkSize / 2;
+                const cy = cMinY + chunkSize / 2;
+
+                const range = state.canvasRange;
+                const globalW = Math.max(1, range.maxX - range.minX + 1);
+                const globalH = Math.max(1, range.maxY - range.minY + 1);
+                // 地图真实中心坐标
+                const mapCenterX = (range.maxX + range.minX) / 2;
+                const mapCenterY = (range.maxY + range.minY) / 2;
+
+                const W = 150, H = 150; // 小地图固定尺寸
+                const zoom = state.settings.miniMapZoom || 1;
+                const scale = Math.min(W / globalW, H / globalH) * zoom;
+
+                // ★ 核心：计算偏移量，使红框中心处于小地图画布中心
+                state.settings.miniMapPanX = (mapCenterX - cx) * scale;
+                state.settings.miniMapPanY = (mapCenterY - cy) * scale;
+
+                saveSettingsOnly();
+                requestRender();
+            });
+
+            // 小地图交互（左键切块，右键平移，滚轮以鼠标为中心缩放）
+            const miniMapCanvas = document.getElementById('miniMapCanvas');
+            
+            miniMapCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+            let isDraggingChunk = false;
+            let isPanningMap = false;
+            let panStartX, panStartY, initialPanX, initialPanY;
+            
+            miniMapCanvas.addEventListener('pointerdown', (e) => {
+                if (e.button === 2) {
+                    isPanningMap = true;
+                    panStartX = e.clientX; panStartY = e.clientY;
+                    initialPanX = state.settings.miniMapPanX || 0;
+                    initialPanY = state.settings.miniMapPanY || 0;
+                    miniMapCanvas.setPointerCapture(e.pointerId);
+                    e.preventDefault();
+                } else if (e.button === 0) {
+                    isDraggingChunk = true;
+                    miniMapCanvas.setPointerCapture(e.pointerId);
+                    handleChunkClick(e);
+                }
+            });
+            
+            // ★ 核心：以鼠标位置为中心缩放
+            miniMapCanvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const rect = miniMapCanvas.getBoundingClientRect();
+                const W = miniMapCanvas.width, H = miniMapCanvas.height;
+                const range = state.canvasRange;
+                
+                const globalW = Math.max(1, range.maxX - range.minX + 1);
+                const globalH = Math.max(1, range.maxY - range.minY + 1);
+                
+                let zoom = state.settings.miniMapZoom || 1;
+                let panX = state.settings.miniMapPanX || 0;
+                let panY = state.settings.miniMapPanY || 0;
+                
+                // 获取当前鼠标在小地图上的坐标 (cx, cy)
+                const cx = (e.clientX - rect.left) * (W / rect.width);
+                const cy = (e.clientY - rect.top) * (H / rect.height);
+
+                // 反推当前鼠标指向的地图真实坐标 (mapX, mapY)
+                const scale = Math.min(W / globalW, H / globalH) * zoom;
+                const offsetX = (W - globalW * scale) / 2 + panX;
+                const offsetY = (H - globalH * scale) / 2 + panY;
+                
+                const mapX = (cx - offsetX) / scale + range.minX;
+                const mapY = (cy - offsetY) / scale + range.minY;
+
+                // 计算新的缩放倍数
+                let newZoom = zoom;
+                if (e.deltaY < 0) newZoom *= 1.2;
+                else newZoom /= 1.2;
+                newZoom = Math.max(0.1, Math.min(newZoom, 50));
+                
+                if (newZoom === zoom) return; // 缩放没变，不处理
+
+                // 计算维持鼠标处坐标不变的新 panX, panY
+                const newScale = Math.min(W / globalW, H / globalH) * newZoom;
+                const newBaseOffsetX = (W - globalW * newScale) / 2;
+                const newBaseOffsetY = (H - globalH * newScale) / 2;
+                
+                // 期望的 offset = cx - (mapX - range.minX) * newScale
+                // 所以 newPanX = 期望的 offset - newBaseOffset
+                const newOffsetX = cx - (mapX - range.minX) * newScale;
+                const newOffsetY = cy - (mapY - range.minY) * newScale;
+                
+                panX = newOffsetX - newBaseOffsetX;
+                panY = newOffsetY - newBaseOffsetY;
+
+                // 保存并重绘
+                state.settings.miniMapZoom = newZoom;
+                state.settings.miniMapPanX = panX;
+                state.settings.miniMapPanY = panY;
+                document.getElementById('miniMapZoomInput').value = newZoom.toFixed(1);
+                
+                saveSettingsOnly();
+                requestRender();
+            }, { passive: false });
+            
+            window.addEventListener('pointermove', (e) => {
+                if (isPanningMap) {
+                    const dx = e.clientX - panStartX;
+                    const dy = e.clientY - panStartY;
+                    state.settings.miniMapPanX = initialPanX + dx;
+                    state.settings.miniMapPanY = initialPanY + dy;
+                    requestRender();
+                } else if (isDraggingChunk) {
+                    handleChunkClick(e);
+                }
+            });
+            
+            window.addEventListener('pointerup', (e) => {
+                if (isPanningMap) {
+                    isPanningMap = false;
+                    if (miniMapCanvas.hasPointerCapture(e.pointerId)) miniMapCanvas.releasePointerCapture(e.pointerId);
+                }
+                if (isDraggingChunk) {
+                    isDraggingChunk = false;
+                    if (miniMapCanvas.hasPointerCapture(e.pointerId)) miniMapCanvas.releasePointerCapture(e.pointerId);
+                }
+            });
+
+            function handleChunkClick(e) {
+                const rect = miniMapCanvas.getBoundingClientRect();
+                const W = miniMapCanvas.width, H = miniMapCanvas.height;
+                const range = state.canvasRange;
+                
+                const globalW = Math.max(1, range.maxX - range.minX + 1);
+                const globalH = Math.max(1, range.maxY - range.minY + 1);
+                
+                const zoom = state.settings.miniMapZoom || 1;
+                const panX = state.settings.miniMapPanX || 0;
+                const panY = state.settings.miniMapPanY || 0;
+                
+                const scale = Math.min(W / globalW, H / globalH) * zoom;
+                const offsetX = (W - globalW * scale) / 2 + panX;
+                const offsetY = (H - globalH * scale) / 2 + panY;
+
+                let clickX = (e.clientX - rect.left) * (W / rect.width);
+                let clickY = (e.clientY - rect.top) * (H / rect.height);
+
+                let realX = Math.floor((clickX - offsetX) / scale) + range.minX;
+                let realY = Math.floor((clickY - offsetY) / scale) + range.minY;
+
+                realX = Math.max(range.minX, Math.min(range.maxX, realX));
+                realY = Math.max(range.minY, Math.min(range.maxY, realY));
+
+                const chunkSize = state.settings.chunkSize || 100;
+                if (!state.currentChunk) state.currentChunk = { x: 0, y: 0 };
+                
+                const newCX = Math.floor(realX / chunkSize);
+                const newCY = Math.floor(realY / chunkSize);
+                
+                if (newCX !== state.currentChunk.x || newCY !== state.currentChunk.y) {
+                    state.currentChunk.x = newCX;
+                    state.currentChunk.y = newCY;
+                    requestRender();
+                }
+            }
         }
-    });
-    document.getElementById('undoBtn')?.addEventListener('click', undo);
-    document.getElementById('redoBtn')?.addEventListener('click', redo);
+    })();
     
-    document.getElementById('canvasAddMode').addEventListener('change', function() {
-        setCanvasEditMode(this.checked ? 'add' : 'select');
-    });
-    
-    document.getElementById('toolWaypoint').addEventListener('click', () => setTool('waypoint'));
+    // 工具栏状态恢复
+    (function restoreToolbarCheckboxes() {
+        const keepCb = document.getElementById('keepPrevProps'); const autoCb = document.getElementById('autoNameCheck'); const addCb = document.getElementById('canvasAddMode');
+        if (keepCb) { keepCb.checked = !!state.keepPrevProps; keepCb.addEventListener('change', function () { state.keepPrevProps = this.checked; saveCache(); }); }
+        if (autoCb) { autoCb.checked = !!state.autoName; autoCb.addEventListener('change', function () { state.autoName = this.checked; saveCache(); }); }
+        if (addCb) { addCb.checked = (state.canvasEditMode === 'add'); }
+    })();
 
-    const pmBtn = document.getElementById('projectManagerBtn');
-    if (pmBtn) pmBtn.addEventListener('click', () => window.PM.open());
-    
-    document.getElementById('toolMultiSelect').addEventListener('click', () => {
-        setTool('multiselect');
-        // 可选：清空之前的选择
-        state.multiSelection = [];
-        requestRender();
-    });
+	state._lastSavedSnapshot = _serializeHistory(); state._undoStack = []; state._redoStack = [];
 
-    // 如果 edgelxe_select.js 提供了初始化函数
-    if (typeof initMultiSelect === 'function') initMultiSelect();
-    
-    document.getElementById('toolMultiSelect').addEventListener('click', () => {
-        setTool('multiselect');
-        state.multiSelection = [];
-        requestRender();
-    });
-    
-    // 把 state 中的设置同步到各子系统
-    if (window.QuickFill && window.QuickFill.setOverwrite) {
-        window.QuickFill.setOverwrite(!!state.settings.pasteOverwrite);
-    }
-    
-    // 在 init 函数末尾，初始化保存按钮的显示状态
-   // ★ 新增：页面加载时，根据保存的自动保存设置，决定是否显示保存按钮
     (function initManualSaveBtn() {
         const manualBtn = document.getElementById('manualSaveBtn');
         if (manualBtn) {
-            const isAuto = state.settings.autoSave !== false;
-            const interval = state.settings.autoSaveInterval || 0;
-            
-            // 只有「开启自动保存」且「实时保存（间隔为0）」时，才隐藏
-            if (isAuto && interval === 0) {
-                manualBtn.style.display = 'none';
-            } else {
-                manualBtn.style.display = 'inline-block';
-            }
+            const isAuto = state.settings.autoSave !== false; const interval = state.settings.autoSaveInterval || 0;
+            manualBtn.style.display = (isAuto && interval === 0) ? 'none' : 'inline-block';
         }
     })();
     
+    if (window.QuickFill?.setOverwrite) window.QuickFill.setOverwrite(!!state.settings.pasteOverwrite);
+    
     window.launchGame = function() {
-        // ★ 修复：从 state.settings 读取，而不是从 DOM 读取
-        const exePath = state.settings.gamePath;
-        if (!exePath) return alert('请先打开设置，选择游戏程序路径');
-        if (typeof require !== 'undefined') {
-            const { ipcRenderer } = require('electron');
-            ipcRenderer.send('launch-game', exePath);
-            showToast('🚀 正在启动游戏...');
-        }
+        const exePath = state.settings.gamePath; if (!exePath) return alert('请先打开设置，选择游戏程序路径');
+        if (typeof require !== 'undefined') { const { ipcRenderer } = require('electron'); ipcRenderer.send('launch-game', exePath); showToast('🚀 正在启动游戏...'); }
     };
-
     window.pickDir = async function(inputId) {
-        if (typeof require !== 'undefined') {
-            const { ipcRenderer } = require('electron');
-            const path = await ipcRenderer.invoke('select-directory');
-            if (path) {
-                const input = document.getElementById(inputId);
-                input.value = path;
-                input.dispatchEvent(new Event('change')); // ★ 手动触发保存事件
-            }
-        } else {
-            alert('仅支持桌面版选择目录');
-        }
+        if (typeof require !== 'undefined') { const { ipcRenderer } = require('electron'); const path = await ipcRenderer.invoke('select-directory'); if (path) { const input = document.getElementById(inputId); input.value = path; input.dispatchEvent(new Event('change')); } }
+        else alert('仅支持桌面版选择目录');
     };
-
     window.pickFile = async function(inputId) {
-        if (typeof require !== 'undefined') {
-            const { ipcRenderer } = require('electron');
-            const path = await ipcRenderer.invoke('select-file');
-            if (path) {
-                const input = document.getElementById(inputId);
-                input.value = path;
-                input.dispatchEvent(new Event('change')); // ★ 手动触发保存事件
-            }
-        } else {
-            alert('仅支持桌面版选择文件');
-        }
+        if (typeof require !== 'undefined') { const { ipcRenderer } = require('electron'); const path = await ipcRenderer.invoke('select-file'); if (path) { const input = document.getElementById(inputId); input.value = path; input.dispatchEvent(new Event('change')); } }
+        else alert('仅支持桌面版选择文件');
     };
     
-    // 假设你的顶栏按钮 ID 是 toolRecorderBtn
     const recorderBtn = document.getElementById('toolRecorderBtn');
-    if (recorderBtn) {
-        recorderBtn.addEventListener('click', () => {
-            if (typeof require !== 'undefined') {
-                const { ipcRenderer } = require('electron');
-                ipcRenderer.send('launch-python-recorder');
-                showToast('🚀 已打开外部录制器');
-            } else {
-                showToast('❌ 仅支持桌面版启动外部录制器');
-            }
-        });
-    }
+    if (recorderBtn) recorderBtn.addEventListener('click', () => { if (typeof require !== 'undefined') { const { ipcRenderer } = require('electron'); ipcRenderer.send('launch-python-recorder'); showToast('🚀 已打开外部录制器'); } else showToast('❌ 仅支持桌面版启动外部录制器'); });
     
-    // ★ 新增：监听主进程的下载完成事件，弹出提示
     if (typeof require !== 'undefined') {
         const { ipcRenderer } = require('electron');
-        ipcRenderer.on('download-finished', (event, filename, savePath) => {
-            // 把路径里的反斜杠转成正斜杠，方便在提示框中显示得好看些
-            const displayPath = savePath.replace(/\\/g, '/');
-            showToast(`✅ ${filename} 已导出到: ${displayPath}`);
-        });
-    }
-    
-    // ★ 接收来自管理器的反编译请求
-    if (typeof require !== 'undefined') {
-        const { ipcRenderer } = require('electron');
+        ipcRenderer.on('download-finished', (event, filename, savePath) => showToast(`✅ ${filename} 已导出到: ${savePath.replace(/\\/g, '/')}`));
         ipcRenderer.on('receive-decompile-request', (event, bufferArray, filename) => {
             showToast(`正在反编译 ${filename}...`);
             try {
                 const buffer = new Uint8Array(bufferArray).buffer;
                 const result = decompileBin(buffer, filename, { staticMovingToPng: false });
                 showDecompileButtons(result, filename);
-                
-                // 自动打开编译对话框并清空之前的日志
-                const dialog = document.getElementById('compileDialog');
-                if (dialog) dialog.style.display = 'flex';
-                document.getElementById('compileLog').textContent = '';
-                document.getElementById('compileDownloadArea').innerHTML = '';
+                const dialog = document.getElementById('compileDialog'); if (dialog) dialog.style.display = 'flex';
+                document.getElementById('compileLog').textContent = ''; document.getElementById('compileDownloadArea').innerHTML = '';
                 safeLog('ok', `反编译成功: ${filename} → XML + ${Object.keys(result.pngs).length} 个 PNG 层`);
-            } catch (err) {
-                showToast(`反编译失败: ${err.message}`);
-            }
+            } catch (err) { showToast(`反编译失败: ${err.message}`); }
         });
     }
     
     const gmBtn = document.getElementById('gameManagerBtn');
-    if (gmBtn) {
-        gmBtn.addEventListener('click', () => {
-            if (typeof require !== 'undefined') {
-                const { ipcRenderer } = require('electron');
-                ipcRenderer.send('open-manager');
-            } else {
-                showToast('仅桌面版支持游戏管理器');
-            }
-        });
-    }
+    if (gmBtn) gmBtn.addEventListener('click', () => { if (typeof require !== 'undefined') { const { ipcRenderer } = require('electron'); ipcRenderer.send('open-manager'); } else showToast('仅桌面版支持游戏管理器'); });
 
-	fixFormFieldAssociations(document);
-	setInteractionMode('preview');
-	showToast('Edge 关卡xml编辑器3D 已启动');
+	fixFormFieldAssociations(document); setInteractionMode('preview'); showToast('Edge 关卡xml编辑器3D 已启动');
 }
 
 document.addEventListener('DOMContentLoaded', init);

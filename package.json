@@ -8,13 +8,13 @@
     "build": "electron-builder"
   },
   "build": {
-    "appId": "com.yourname.edgeeditor",
-    "productName": "Edge Level Editor",
+    "electronLanguages": ["zh-CN", "en-US"],
+    "appId": "com.voyager1112.edgeleveledit",
+    "productName": "EdgeLevelEdit",
     "directories": {
       "output": "dist"
     },
     "asar": true,
-    "compression": "maximum",
     "files": [
       "main.js",
       "index.html",
@@ -25,7 +25,7 @@
     "win": {
       "target": [
         {
-          "target": "zip",
+          "target": "7z",
           "arch": ["x64"]
         }
       ],

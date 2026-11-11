@@ -99,12 +99,17 @@
         <div class="tb-row">
             <span class="tb-label">游戏路径：</span>
             <select id="gamePathSelect" style="min-width: 300px; flex: 1;"></select>
+            <button id="openDirBtn">打开目录</button>
             <button id="addPathBtn">＋ 添加</button>
             <button id="refreshBtn">↺ 刷新</button>
             <button id="launchGameBtn" class="primary">▶ 启动游戏</button>
             <div class="sep"></div>
-            <!--button id="importFileBtn" class="primary">📥 选择文件导入</button>
-            <input type="file" id="importFileInput" accept=".bin,.zip" multiple style="display:none;"-->
+            <span class="tb-label">默认导入到：</span>
+            <select id="defaultSegmentSelect">
+                <option value="bonus">Bonus 末尾</option>
+                <option value="standard">Standard 末尾</option>
+                <option value="extended">Extended 末尾</option>
+            </select>
             <label class="tb-label"><input type="checkbox" id="customPosCheck"> 自定义导入位置</label>
             <select id="posRelative">
                 <option value="before">插入到选中行之前</option>
@@ -190,6 +195,34 @@
             return crc.toString(16).toUpperCase().padStart(8, '0') + '050DB82A';
         }
 
+        // 防止 XML 注入（转义 < > & " '）
+        function escapeXml(unsafe) {
+            if (unsafe === undefined || unsafe === null) return '';
+            return String(unsafe).replace(/[<>&'"]/g, function (c) {
+                switch (c) {
+                    case '<': return '&lt;';
+                    case '>': return '&gt;';
+                    case '&': return '&amp;';
+                    case '\'': return '&apos;';
+                    case '"': return '&quot;';
+                }
+            });
+        }
+
+        // 防止 HTML 标签截断
+        function escapeHtml(unsafe) {
+            if (unsafe === undefined || unsafe === null) return '';
+            return String(unsafe).replace(/[&<>"']/g, function (c) {
+                return {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;'
+                }[c];
+            });
+        }
+
         // ================= 初始化与路径管理 =================
         function initPaths() {
             const sel = document.getElementById('gamePathSelect');
@@ -223,6 +256,27 @@
                 document.getElementById('statusText').textContent = '已取消暂存导入';
             }
         };
+        
+        // ================= 导入设置状态保存 =================
+        const customPosCheck = document.getElementById('customPosCheck');
+        const defaultSegmentSelect = document.getElementById('defaultSegmentSelect');
+        const posRelative = document.getElementById('posRelative');
+
+        // 恢复上次的选择
+        customPosCheck.checked = localStorage.getItem('edge_custom_pos') === 'true';
+        defaultSegmentSelect.value = localStorage.getItem('edge_default_segment') || 'bonus';
+        posRelative.value = localStorage.getItem('edge_pos_relative') || 'before'; // ★ 新增
+
+        // 监听变化并保存
+        customPosCheck.addEventListener('change', () => {
+            localStorage.setItem('edge_custom_pos', customPosCheck.checked);
+        });
+        defaultSegmentSelect.addEventListener('change', () => {
+            localStorage.setItem('edge_default_segment', defaultSegmentSelect.value);
+        });
+        posRelative.addEventListener('change', () => { // ★ 新增
+            localStorage.setItem('edge_pos_relative', posRelative.value);
+        });
 
         document.getElementById('gamePathSelect').onchange = function() {
             currentExePath = this.value;
@@ -243,6 +297,15 @@
                 refreshList();
             } else if (file) {
                 alert('请选择有效的游戏 EXE 文件');
+            }
+        };
+
+        // ★ 新增：打开当前游戏目录
+        document.getElementById('openDirBtn').onclick = async () => {
+            if (!currentGameDir) return alert('请先选择游戏路径');
+            const res = await ipcRenderer.invoke('open-folder', currentGameDir);
+            if (!res.success) {
+                alert('打开目录失败: ' + res.msg);
             }
         };
 
@@ -304,7 +367,8 @@
             for (const segment of ['standard', 'bonus', 'extended']) {
                 xml += `  <${segment} special_locked_level_count="${data[segment].locked}">\n`;
                 for (const lvl of data[segment].levels) {
-                    const attrStr = Object.entries(lvl.attrs).map(([k,v]) => `${k}="${v}"`).join(' ');
+                    // ★ 核心修改：使用 escapeXml 转义属性值，防止单双引号截断 XML
+                    const attrStr = Object.entries(lvl.attrs).map(([k,v]) => `${k}="${escapeXml(v)}"`).join(' ');
                     if (lvl.enabled) {
                         xml += `    <level ${attrStr}/>\n`;
                     } else {
@@ -368,6 +432,9 @@
                     const attrs = lvl.attrs;
                     const filename = attrs.filename || '';
                     
+                    // ★ 核心修复：将单引号替换为 %27，彻底杜绝 onclick 字符串截断报错
+                    const safeFilename = encodeURIComponent(filename).replace(/'/g, "%27");
+                    
                     // 缓存处理
                     let meta = levelCache[filename] || { name: '...', levelId: '...' };
                     if (!levelCache[filename]) {
@@ -377,17 +444,18 @@
                     tr.innerHTML = `
                         <td align="center"><input type="checkbox" ${lvl.enabled ? 'checked' : ''} onchange="toggleEnable('${segment}', ${index}, this.checked)"></td>
                         <td>${index + 1}</td>
-                        <td>${filename}</td>
-                        <td class="cell-name">${meta.name}</td>
+                        <td>${escapeHtml(filename)}</td>
+                        <td class="cell-name">${escapeHtml(meta.name)}</td>
                         <td class="cell-id">${meta.levelId}</td>
-                        <td>${attrs.leaderboard_id || ''}</td>
-                        <td>${attrs.name_sfx || ''}</td>
+                        <td>${escapeHtml(attrs.leaderboard_id || '')}</td>
+                        <td>${escapeHtml(attrs.name_sfx || '')}</td>
                         <td>
                             <div class="cell-actions">
                                 <button class="btn-sm" onclick="event.stopPropagation(); moveRow('${segment}', ${index}, -1)">↑</button>
                                 <button class="btn-sm" onclick="event.stopPropagation(); moveRow('${segment}', ${index}, 1)">↓</button>
-                                <button class="btn-sm" onclick="event.stopPropagation(); decompileLevel('${encodeURIComponent(filename)}')">反编译</button>
-                                <button class="btn-sm btn-danger" onclick="event.stopPropagation(); deleteLevel('${segment}', ${index}, '${encodeURIComponent(filename)}')">删除</button>
+                                <!-- ★ 使用 safeFilename -->
+                                <button class="btn-sm" onclick="event.stopPropagation(); decompileLevel('${safeFilename}')">反编译</button>
+                                <button class="btn-sm btn-danger" onclick="event.stopPropagation(); deleteLevel('${segment}', ${index}, '${safeFilename}')">删除</button>
                             </div>
                         </td>
                     `;
@@ -619,7 +687,9 @@
 
             const customPos = document.getElementById('customPosCheck').checked;
             if (!customPos) {
-                await performImport('bonus', mappingData.bonus.levels.length);
+                // ★ 修改：读取下拉框选中的分区，并插入到该分区末尾
+                const targetSeg = document.getElementById('defaultSegmentSelect').value;
+                await performImport(targetSeg, mappingData[targetSeg].levels.length);
             } else {
                 document.getElementById('pendingText').textContent = `⚠️ 已暂存 ${filename}，请点击表格中的一行以确定插入位置！`;
                 alert(`已暂存：${filename}\n请点击表格中的一行确定插入位置。`);
@@ -628,7 +698,9 @@
 
         // 批量导入（统一确认，静默追加/覆盖，不打断用户）
         async function handleBatchImport(queue) {
-            const msg = `检测到待导入 ${queue.length} 个关卡。\n\n批量导入将默认追加到 Bonus 末尾。如果遇到已存在的关卡名，将自动覆盖其文件且不改变原有排序。\n\n是否继续？`;
+            const targetSeg = document.getElementById('defaultSegmentSelect').value;
+            // ★ 修改：动态显示目标分区名称
+            const msg = `检测到待导入 ${queue.length} 个关卡。\n\n批量导入将默认追加到 ${targetSeg.toUpperCase()} 末尾。如果遇到已存在的关卡名，将自动覆盖其文件且不改变原有排序。\n\n是否继续？`;
             if (!confirm(msg)) return;
 
             let addedCount = 0;
@@ -658,13 +730,11 @@
                 if (isDuplicate) {
                     updatedCount++;
                 } else {
-                    // 追加到 Bonus
-                    mappingData.bonus.levels.push({
+                    // ★ 修改：追加到用户选择的分区
+                    mappingData[targetSeg].levels.push({
                         enabled: true,
                         attrs: {
                             filename: item.filename,
-                            leaderboard_id: meta.levelId.toString(),
-                            name_sfx: meta.name
                         }
                     });
                     addedCount++;
@@ -756,8 +826,6 @@
                 enabled: true,
                 attrs: {
                     filename: filename,
-                    leaderboard_id: meta.levelId.toString(),
-                    name_sfx: meta.name
                 }
             };
             

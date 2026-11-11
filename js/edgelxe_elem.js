@@ -129,10 +129,11 @@ const state = {
 	selected3D: null,          // 当前3D选中的元素 { type, id, mesh }
 	highlightedMesh: null,     // 当前高亮mesh（准星对准）
 	canvasRange: { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 },
+    currentChunk: { x: 0, y: 0 },
     _suppressUI: false,
     canvasEditMode: 'select',   // 'select' | 'add'
     selectedWaypoint: null,  // { movingId, idx }
-    multiSelection: [],   // ← 新增
+    multiSelection: [],   // 多选
     settings: {
         importNewProject: false,   // true=导入到新项目，false=导入到当前项目
         useShareDownload: false,   // ★ 手机下载（Web Share API）
@@ -144,6 +145,10 @@ const state = {
         enableCompression: true, // ★ 新增：是否开启压缩
         useCustomExportDir: false,  // ★ 新增
         customExportPath: '',       // ★ 新增
+        chunkSize: 100,       // ★ 新增
+        chunkThreshold: 500,  // ★ 
+        autoJumpChunk: true,   // ★ 新增：点击元素是否自动跳区块
+        autoJumpLayer: false,  // ★ 新增：点击元素是否自动跳层
     },
     _hasUnsavedChanges: false, // ★ 新增：记录是否有未保存改动
     _lastSelectionBox: null,   // ★ 最近一次框选范围 {minX,minY,minZ,maxX,maxY,maxZ}
@@ -842,15 +847,30 @@ function selectElement(type, id, skipRender = false) {
 		}
 	}
 
-    const newCoord = getElementCoord(type, id); // 需要实现
+    const newCoord = getElementCoord(type, id);
+    if (newCoord) {
+        if (state.settings.autoJumpChunk !== false) {
+            const chunkSize = state.settings.chunkSize || 100;
+            const targetCX = Math.floor(newCoord.x / chunkSize);
+            const targetCY = Math.floor(newCoord.y / chunkSize);
+            if (!state.currentChunk) state.currentChunk = { x: 0, y: 0 };
+            if (targetCX !== state.currentChunk.x || targetCY !== state.currentChunk.y) {
+                state.currentChunk.x = targetCX;
+                state.currentChunk.y = targetCY;
+            }
+        }
+        if (state.settings.autoJumpLayer) {
+            if (state.currentLayer !== newCoord.z) {
+                state.currentLayer = newCoord.z;
+                layerInput.value = newCoord.z;
+                updateLayerMax();
+            }
+        }
+    }
+    
     // 清除旧选中
     if (oldCoord) {
         updatePixelAt(oldCoord.x, oldCoord.y, oldCoord.z);
-    }
-    // 设置新选中
-    if (newCoord) {
-        updatePixelAt(newCoord.x, newCoord.y, newCoord.z);
-        lastSelectedCoord = newCoord;
     }
     if (!skipRender) {
         // 非跳过模式，触发全量刷新（但我们的 renderGrid 已优化）
@@ -1093,6 +1113,7 @@ function toggleStaticBlock(x, y, z) {
     uniInterface();
 }
 
+// 在 selectStatic 中
 function selectStatic(x, y, z) {
 	const layer = state.staticBlocks[z];
 	if (!layer || !layer[y] || !layer[y][x]) {
@@ -1101,6 +1122,26 @@ function selectStatic(x, y, z) {
 		requestRender();
 		return;
 	}
+
+    // ★ 自动跳块/跳层
+    if (state.settings.autoJumpChunk !== false) {
+        const chunkSize = state.settings.chunkSize || 100;
+        const targetCX = Math.floor(x / chunkSize);
+        const targetCY = Math.floor(y / chunkSize);
+        if (!state.currentChunk) state.currentChunk = { x: 0, y: 0 };
+        if (targetCX !== state.currentChunk.x || targetCY !== state.currentChunk.y) {
+            state.currentChunk.x = targetCX;
+            state.currentChunk.y = targetCY;
+        }
+    }
+    if (state.settings.autoJumpLayer) {
+        if (state.currentLayer !== z) {
+            state.currentLayer = z;
+            layerInput.value = z;
+            updateLayerMax();
+        }
+    }
+
 	state.selectedElement = { type: 'static', staticCoord: { x, y, z } };
 	requestRender();
 	updatePanel();

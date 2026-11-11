@@ -31,6 +31,19 @@ function createWindow() {
   win.setMenuBarVisibility(false);
   win.loadFile('index.html');
 
+// 拦截 target="_blank" 打开的新窗口，给它放行 Node 环境
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: {
+        webPreferences: {
+          nodeIntegration: true,
+          contextIsolation: false
+        }
+      }
+    };
+  });
+
   win.on('closed', () => {
     win = null;
   });
@@ -207,13 +220,24 @@ app.whenReady().then(() => {
 });
 
 // 文件选择与保存 IPC
-ipcMain.handle('select-directory', async () => {
-  const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
+ipcMain.handle('select-directory', async (event) => {
+  // ★ 修复：动态获取当前弹出请求的窗口作为父窗口
+  const focusedWin = BrowserWindow.fromWebContents(event.sender) || win;
+  const result = await dialog.showOpenDialog(focusedWin, { properties: ['openDirectory'] });
   return result.canceled ? null : result.filePaths[0];
 });
-ipcMain.handle('select-file', async () => {
-  const result = await dialog.showOpenDialog(win, { properties: ['openFile'] });
+
+ipcMain.handle('select-file', async (event) => {
+  const focusedWin = BrowserWindow.fromWebContents(event.sender) || win;
+  const result = await dialog.showOpenDialog(focusedWin, { properties: ['openFile'] });
   return result.canceled ? null : result.filePaths[0];
+});
+
+// ★ 新增：打开本地文件夹
+ipcMain.handle('open-folder', async (event, dirPath) => {
+  if (!dirPath) return { success: false, msg: '路径为空' };
+  const err = await shell.openPath(dirPath);
+  return err ? { success: false, msg: err } : { success: true };
 });
 ipcMain.handle('save-file', async (event, { defaultName, customDir, buffer }) => {
   try {
