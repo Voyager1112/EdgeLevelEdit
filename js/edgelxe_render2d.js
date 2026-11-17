@@ -13,9 +13,17 @@ function requestRender() {
 		});
 	}
 }
+const _cssVarCache = {};
 function getCSSVar(name) {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    if (_cssVarCache[name] !== undefined) return _cssVarCache[name];
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    _cssVarCache[name] = v;
+    return v;
 }
+// 主题切换时清空缓存
+window._clearCSSVarCache = function () {
+    for (const k in _cssVarCache) delete _cssVarCache[k];
+};
 
 // 渲染网格
 let _minX = 0, _minY = 0;
@@ -108,20 +116,12 @@ function renderGrid() {
     ctx.save();
     ctx.scale(_canvasScale, _canvasScale);
 
-    // 4. 绘制背景和网格
+    // 4. 绘制背景（网格线统一在步骤 7 画）
     const cssBorder = getCSSVar('--border-strong') || '#bcbcbc';
+    const cssBgGrid = getCSSVar('--bg-grid') || '#c9c9c9';   // ← 保留这行
+
     ctx.fillStyle = '#0a0a1a'; 
     ctx.fillRect(0, 0, targetWidth, targetHeight);
-    
-    const cssBgGrid = getCSSVar('--bg-grid') || '#c9c9c9';
-    ctx.strokeStyle = cssBgGrid;
-    ctx.lineWidth = 0.5;
-    for (let i = 0; i <= gridW; i++) {
-        ctx.beginPath(); ctx.moveTo(padding + i * pixelSize, padding); ctx.lineTo(padding + i * pixelSize, targetHeight - padding); ctx.stroke();
-    }
-    for (let i = 0; i <= gridH; i++) {
-        ctx.beginPath(); ctx.moveTo(padding, padding + i * pixelSize); ctx.lineTo(targetWidth - padding, padding + i * pixelSize); ctx.stroke();
-    }
 
     // 5. 收集半径元素（仅绘制在视野内的）
     const radiusElements = [];
@@ -153,20 +153,28 @@ function renderGrid() {
         }
     }
 
-    // 7. 绘制网格线
-	ctx.save();
-	ctx.strokeStyle = cssBgGrid;
-	ctx.lineWidth = 0.8;
-	for (let i = 0; i <= gridW; i++) {
-		ctx.beginPath(); ctx.moveTo(padding + i * pixelSize, padding); ctx.lineTo(padding + i * pixelSize, targetHeight - padding); ctx.stroke();
-	}
-	for (let i = 0; i <= gridH; i++) {
-		ctx.beginPath(); ctx.moveTo(padding, padding + i * pixelSize); ctx.lineTo(targetWidth - padding, padding + i * pixelSize); ctx.stroke();
-	}
-	ctx.strokeStyle = cssBorder;
-	ctx.lineWidth = 1.5;
-	ctx.strokeRect(padding, padding, gridW * pixelSize, gridH * pixelSize);
-	ctx.restore();
+    // 7. 绘制网格线（单次 stroke，避免 200 次 draw call）
+    if (gridW <= 200 && gridH <= 200) {          // 太大就跳过，避免视觉噪音
+        ctx.save();
+        ctx.strokeStyle = cssBgGrid;
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        for (let i = 0; i <= gridW; i++) {
+            const x = padding + i * pixelSize;
+            ctx.moveTo(x, padding);
+            ctx.lineTo(x, targetHeight - padding);
+        }
+        for (let i = 0; i <= gridH; i++) {
+            const y = padding + i * pixelSize;
+            ctx.moveTo(padding, y);
+            ctx.lineTo(targetWidth - padding, y);
+        }
+        ctx.stroke();                            // ← 一次 stroke 画完所有线
+        ctx.restore();
+    }
+    ctx.strokeStyle = cssBorder;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(padding, padding, gridW * pixelSize, gridH * pixelSize);
     
     // 绘制半径虚线
     if (radiusElements.length > 0) {
@@ -254,26 +262,61 @@ function renderGrid() {
 }
 
 // ==================== 新增：小地图渲染 ====================
+let _miniMapLastRender = 0;
+let _miniMapPending = false;
+
 function renderMiniMap() {
+    const now = performance.now();
+    if (now - _miniMapLastRender < 200) {
+        if (_miniMapPending) return;
+        _miniMapPending = true;
+        setTimeout(() => {
+            _miniMapPending = false;
+            _miniMapLastRender = performance.now();
+            _doRenderMiniMap();
+        }, 200 - (now - _miniMapLastRender));
+        return;
+    }
+    _miniMapLastRender = now;
+    _doRenderMiniMap();
+}
+
+function _doRenderMiniMap() {
     const cvs = document.getElementById('miniMapCanvas');
     if (!cvs) return;
     const ctx = cvs.getContext('2d');
     const W = cvs.width, H = cvs.height;
     ctx.clearRect(0, 0, W, H);
-    
+
     const range = state.canvasRange;
     const globalW = Math.max(1, range.maxX - range.minX + 1);
     const globalH = Math.max(1, range.maxY - range.minY + 1);
-    
-    // ★ 获取缩放和平移参数
     const zoom = state.settings.miniMapZoom || 1;
     const panX = state.settings.miniMapPanX || 0;
     const panY = state.settings.miniMapPanY || 0;
-    
-    // ★ 计算缩放并加上平移偏移
     const scale = Math.min(W / globalW, H / globalH) * zoom;
     const offsetX = (W - globalW * scale) / 2 + panX;
     const offsetY = (H - globalH * scale) / 2 + panY;
+
+    // ★ 空层跳过（利用 _staticCounts）
+    const counts = state._staticCounts || {};
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    for (let z in state.staticBlocks) {
+        if (!counts[z]) continue;           // 该层 0 个方块，直接跳过
+        const layer = state.staticBlocks[z];
+        if (!layer) continue;
+        for (let y = 0; y < layer.length; y++) {
+            const row = layer[y];
+            if (!row) continue;
+            for (let x = 0; x < row.length; x++) {
+                if (row[x]) {
+                    const px = offsetX + (x - range.minX) * scale;
+                    const py = offsetY + (y - range.minY) * scale;
+                    ctx.fillRect(px, py, Math.max(1, scale), Math.max(1, scale));
+                }
+            }
+        }
+    }
 
     // 绘制所有方块缩略图 (白色)
     ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';

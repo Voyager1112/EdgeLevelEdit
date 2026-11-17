@@ -1,54 +1,4 @@
 // 导出PNG
-/*function exportPNG() {
-	const { w, l, h } = state.level.size;
-	const baseName = state.level.name || 'level';
-	let exported = 0;
-	for (let z = 0; z < h; z++) {
-		const layer = state.staticBlocks[z];
-		// 检查该层是否有任何静态方块
-		let hasBlock = false;
-		if (layer) {
-			for (let y = 0; y < l; y++) {
-				for (let x = 0; x < w; x++) {
-					if (layer[y] && layer[y][x]) { hasBlock = true; break; }
-				}
-				if (hasBlock) break;
-			}
-		}
-		if (!hasBlock) continue; // 跳过无方块层
-		const canvas = document.createElement('canvas');
-		canvas.width = w;
-		canvas.height = l;
-		const ctx = canvas.getContext('2d');
-		const imageData = ctx.createImageData(w, l);
-		const data = imageData.data;
-		for (let y = 0; y < l; y++) {
-			for (let x = 0; x < w; x++) {
-				const idx = (y * w + x) * 4;
-				const block = layer && layer[y] && layer[y][x];
-				if (block) {
-					data[idx] = block.r;
-					data[idx+1] = block.g;
-					data[idx+2] = block.b;
-					data[idx+3] = 255;
-				} else {
-					data[idx] = 0;
-					data[idx+1] = 0;
-					data[idx+2] = 0;
-					data[idx+3] = 255;
-				}
-			}
-		}
-		ctx.putImageData(imageData, 0, 0);
-		canvas.toBlob(function(blob) {
-			downloadFile(blob, `${baseName}.${z}.png`);
-		}, 'image/png');
-		exported++;
-	}
-	showToast(`已导出 ${exported} 个PNG文件 (${baseName}.z.png)`);
-}*/
-
-// 导出PNG
 async function exportPNG() {
     const { w, l, h } = state.level.size;
     const baseName = state.level.name || 'level';
@@ -443,22 +393,21 @@ async function loadXMLAndPNG(files) {
     // 兼容 FileList / 数组，快照为真数组，避免后续被清空
     files = Array.from(files);
 
-    // ★ 导入全过程只记一次 undo
-    const importBeforeSnap = _serializeHistory();
+    // ★ 导入全过程只记一次 undo —— 新方案：导入属于 macro 操作，直接清空栈
     const importPrevSuppressUndo = state._suppressUndo;
     state._suppressUndo = true;
-    // 结束导入并记一次 undo 的辅助函数
+
     function _finishImport() {
         state._suppressUndo = importPrevSuppressUndo;
-        const afterSnap = _serializeHistory();
-        if (importBeforeSnap !== afterSnap) {
-            state._undoStack = state._undoStack || [];
-            state._redoStack = state._redoStack || [];
-            state._undoStack.push(importBeforeSnap);
-            while (state._undoStack.length > 50) state._undoStack.shift();
-            state._redoStack.length = 0;
-        }
-        state._lastSavedSnapshot = afterSnap;
+        // 导入会替换 state.xxx 的数组引用，旧撤销记录里的 array 引用已失效，
+        // 保留栈反而会在撤销时"改了个没人看的旧数组"，所以直接清空。
+        state._undoStack = [];
+        state._redoStack = [];
+        // 索引全量重建 + 全量标脏（数据全变了）
+        if (typeof rebuildSpatialIndex === 'function') rebuildSpatialIndex();
+        if (typeof _markAllDirty === 'function') _markAllDirty();
+        // 触发一次保存
+        saveCache();
     }
 
     if (!state._idCounters) state._idCounters = {};

@@ -609,24 +609,17 @@ function buildOccupiedSet() {
 }
 
 // ==================== 快速填充：静默写入 ====================
-/*function fillStaticAt(x, y, z) {
-    if (x < 0 || x >= state.level.size.w || y < 0 || y >= state.level.size.l ||
-        z < 0 || z >= state.level.size.h) return false;
-    const layer = state.staticBlocks[z];
-    if (!layer || layer[y][x]) return false;
-    const color = state.staticColor || getStaticDefault(z);
-    layer[y][x] = { r: color.r, g: color.g, b: color.b };
-    return true;
-}*/
-
 function fillStaticAt(x, y, z) {
     if (x < 0 || x >= state.level.size.w || y < 0 || y >= state.level.size.l ||
         z < 0 || z >= state.level.size.h) return false;
-    // ★ 只有真正需要写入了，才创建层
     const layer = state.staticBlocks[z] || getOrCreateLayer(z);
     if (!layer || layer[y][x]) return false;
     const color = state.staticColor || getStaticDefault(z);
-    layer[y][x] = { r: color.r, g: color.g, b: color.b };
+    const after = { r: color.r, g: color.g, b: color.b };
+    layer[y][x] = after;
+    _recordStep({ kind: 'static', x, y, z, before: null, after: { ...after } });   // ★
+    _markDirty(`layer_${z}`);                                                       // ★
+    _adjustStaticCount(z, 1);
     return true;
 }
 
@@ -638,7 +631,14 @@ function deleteElementSilent(type, id) {
     if (t === 'seqbutton') {
         for (const seq of state.buttonSequences) {
             const idx = seq.buttons ? seq.buttons.findIndex(b => b.id === id) : -1;
-            if (idx !== -1) { seq.buttons.splice(idx, 1); return; }
+            if (idx !== -1) {
+                const before = _cloneDeep(seq);                                      // ★
+                const removedBtn = seq.buttons[idx];
+                seq.buttons.splice(idx, 1);
+                _removeFromIndex(removedBtn);                                        // ★
+                _recordSet('buttonSequence', seq, before);                           // ★
+                return;
+            }
         }
         return;
     }
@@ -653,8 +653,15 @@ function deleteElementSilent(type, id) {
     if (!arr) return;
     const idx = arr.findIndex(m => m.id === id);
     if (idx === -1) return;
+    const elemToDelete = arr[idx];
+
+    // ★ 1. 抓 effects（cleanReferences 可能改到的其他元素）
+    const refIds = [elemToDelete.xmlId, elemToDelete.id, id].filter(Boolean);
+    const effects = _snapshotDeleteEffects(refIds);
+
+    // ★ 2. 原有解绑副作用
     if (t === 'moving') {
-        const mp = arr[idx];
+        const mp = elemToDelete;
         const pos = getMovingPos(mp);
         state.buttons.forEach(btn => {
             if (btn.movingPlatformID === mp.xmlId || btn.movingPlatformID === mp.id) {
@@ -671,10 +678,17 @@ function deleteElementSilent(type, id) {
             });
         });
     }
-    const elem = arr[idx];
-    cleanReferences(elem.xmlId || elem.id || id);
-    arr.splice(idx, 1);
+
+    // ★ 3. cleanReferences
+    cleanReferences(elemToDelete.xmlId || elemToDelete.id || id);
+
+    // ★ 4. 现抓 after
+    effects.forEach(e => { e.after = _cloneDeep(e.target); });
+
+    // ★ 5. 记录（_recordRemove 内部做 splice + 更新索引 + 恢复 effects 索引）
+    _recordRemove(t, arr, elemToDelete, effects);
 }
+
 function mp_xmlId(elem) { return (elem && (elem.xmlId || elem.id)) || null; }
 
 // ==================== 快速填充：主执行 ====================
@@ -715,17 +729,25 @@ function qfExecute() {
     }
     if (!confirm(`即将${isEraser ? '删除' : '填充'} ${targets.length} 个位置，确定吗？`)) return;
 
+    // ★ 用 session marker，不再用 _suppressUndo + 快照
+    const prevSuppressUI = state._suppressUI;
     state._suppressUI = true;
-    const beforeSnap = _serializeHistory();
-    const prevSuppress = state._suppressUndo;
-    state._suppressUndo = true;
+    state._sessionMarker = state._undoStack ? state._undoStack.length : 0;
 
     let count = 0;
     try {
         if (isEraser) {
             targets.forEach(p => {
                 const layer = state.staticBlocks[p.z];
-                if (layer && layer[p.y] && layer[p.y][p.x]) layer[p.y][p.x] = null;
+                if (layer && layer[p.y] && layer[p.y][p.x]) {
+                    // ★ 静态方块删除记一步
+                    const old = { ...layer[p.y][p.x] };
+                    layer[p.y][p.x] = null;
+                    _recordStep({ kind: 'static', x: p.x, y: p.y, z: p.z, before: old, after: null });
+                    _markDirty(`layer_${p.z}`);
+                    _adjustStaticCount(p.z, -1);
+                    count++;
+                }
                 const entries = getEntriesAt(p.x, p.y, p.z);
                 const seen = new Set();
                 entries.forEach(e => {
@@ -733,17 +755,22 @@ function qfExecute() {
                     const key = `${e.type}:${e.id}`;
                     if (seen.has(key)) return;
                     seen.add(key);
-                    deleteElementSilent(e.type, e.id);
+                    deleteElementSilent(e.type, e.id);   // 内部已加 _record*
                     count++;
                 });
             });
-            if (count === 0) count = targets.length;
         } else {
             targets.forEach(p => {
                 const key = `${p.x},${p.y},${p.z}`;
                 if (qf.coverExisting && occupied.has(key)) {
                     const layer = state.staticBlocks[p.z];
-                    if (layer && layer[p.y] && layer[p.y][p.x]) layer[p.y][p.x] = null;
+                    if (layer && layer[p.y] && layer[p.y][p.x]) {
+                        const old = { ...layer[p.y][p.x] };
+                        layer[p.y][p.x] = null;
+                        _recordStep({ kind: 'static', x: p.x, y: p.y, z: p.z, before: old, after: null });
+                        _markDirty(`layer_${p.z}`);
+                        _adjustStaticCount(p.z, -1);
+                    }
                     const entries = getEntriesAt(p.x, p.y, p.z);
                     const seen = new Set();
                     entries.forEach(e => {
@@ -758,6 +785,7 @@ function qfExecute() {
                 if (tool === 'static') {
                     if (fillStaticAt(p.x, p.y, p.z)) count++;
                 } else {
+                    // 下面这些 placeXxx 内部已调 _recordAdd
                     switch (tool) {
                         case 'moving': placeMoving(p.x, p.y, p.z); break;
                         case 'falling': placeFalling(p.x, p.y, p.z); break;
@@ -776,19 +804,11 @@ function qfExecute() {
             });
         }
     } finally {
-        state._suppressUI = false;
-        state._suppressUndo = prevSuppress;
+        state._suppressUI = prevSuppressUI;
     }
 
-    const afterSnap = _serializeHistory();
-    if (beforeSnap !== afterSnap) {
-        state._undoStack = state._undoStack || [];
-        state._redoStack = state._redoStack || [];
-        state._undoStack.push(beforeSnap);
-        while (state._undoStack.length > 50) state._undoStack.shift();
-        state._redoStack.length = 0;
-    }
-    state._lastSavedSnapshot = _serializeHistory();
+    // ★ 合并 session 里的所有记录为一条 batch
+    _flushSessionUndo();
 
     rebuildSpatialIndex();
     updateCanvasRangeFromSize();
@@ -922,11 +942,9 @@ function doCopy() {
 function doPaste() {
     if (!cb.clipboard) { showToast('剪贴板为空'); return; }
     if (!cb.pasteCoord) { showToast('请先记录粘贴目标坐标'); return; }
-    // 整份深拷贝，避免污染剪贴板里原始数据
     const clip = JSON.parse(JSON.stringify(cb.clipboard));
     const target = cb.pasteCoord;
     const normal = cb.normal;
-    //const clip = cb.clipboard;
 
     function mapOffset(rx, ry, rz) {
         let mx, my;
@@ -1009,11 +1027,9 @@ function doPaste() {
     }
 
     const prevSuppressUI = state._suppressUI;
-    const prevSuppressUndo = state._suppressUndo;
     state._suppressUI = true;
-    state._suppressUndo = true;
+    state._sessionMarker = state._undoStack ? state._undoStack.length : 0;   // ★
 
-    const beforeSnap = _serializeHistory();
     let countBlocks = 0, countElems = 0;
 
     const getArray = t => ({
@@ -1024,7 +1040,7 @@ function doPaste() {
     })[t];
 
     try {
-        // ★ 覆盖模式：先清空目标区域
+        // 覆盖模式：先清空目标区域
         if (cb.overwrite && clip.max) {
             const bW = clip.max.x - clip.min.x;
             const bL = clip.max.y - clip.min.y;
@@ -1036,10 +1052,16 @@ function doPaste() {
                         if (dst.x < 0 || dst.x >= state.level.size.w) continue;
                         if (dst.y < 0 || dst.y >= state.level.size.l) continue;
                         if (dst.z < 0 || dst.z >= state.level.size.h) continue;
-                        // 清空静态方块
+                        // 清空静态方块（★ 带撤销记录）
                         const layer = state.staticBlocks[dst.z];
-                        if (layer && layer[dst.y]) layer[dst.y][dst.x] = null;
-                        // 清空非静态元素
+                        if (layer && layer[dst.y] && layer[dst.y][dst.x]) {
+                            const old = { ...layer[dst.y][dst.x] };
+                            layer[dst.y][dst.x] = null;
+                            _recordStep({ kind: 'static', x: dst.x, y: dst.y, z: dst.z, before: old, after: null });
+                            _markDirty(`layer_${dst.z}`);
+                            _adjustStaticCount(dst.z, -1);
+                        }
+                        // 清空非静态元素（deleteElementSilent 内部已带记录）
                         const entries = getEntriesAt(dst.x, dst.y, dst.z);
                         entries.forEach(e => {
                             if (e.type === 'waypoint') return;
@@ -1049,17 +1071,25 @@ function doPaste() {
                 }
             }
         }
+
+        // 粘贴静态方块（★ 带撤销记录）
         clip.blocks.forEach(b => {
             const dst = mapOffset(b.x - clip.min.x, b.y - clip.min.y, b.z - clip.min.z);
             if (dst.x < 0 || dst.x >= state.level.size.w ||
                 dst.y < 0 || dst.y >= state.level.size.l ||
                 dst.z < 0 || dst.z >= state.level.size.h) return;
-            const layer = state.staticBlocks[dst.z];
+            const layer = _ensureLayer(dst.z);
             if (!layer) return;
-            layer[dst.y][dst.x] = { r: b.r, g: b.g, b: b.b };
+            const before = layer[dst.y][dst.x] ? { ...layer[dst.y][dst.x] } : null;
+            const after = { r: b.r, g: b.g, b: b.b };
+            layer[dst.y][dst.x] = after;
+            _recordStep({ kind: 'static', x: dst.x, y: dst.y, z: dst.z, before, after: { ...after } });
+            _markDirty(`layer_${dst.z}`);
+            if (!before) _adjustStaticCount(dst.z, 1);
             countBlocks++;
         });
 
+        // 粘贴元素（placeXxx 都是直接 push，这里要手动 _recordAdd）
         clip.elements.forEach(item => {
             const c = item.clone;
             if (item.kind === 'top') {
@@ -1083,7 +1113,11 @@ function doPaste() {
                 }
                 remapReferences(c);
                 const arr = getArray(item.type);
-                if (arr) { arr.push(c); countElems++; }
+                if (arr) {
+                    arr.push(c);
+                    _recordAdd(item.type, arr, c);                          // ★
+                    countElems++;
+                }
             } else if (item.kind === 'buttonsequence') {
                 (c.buttons || []).forEach((btn, i) => {
                     const r = item.childRels[i];
@@ -1094,23 +1128,15 @@ function doPaste() {
                 remapReferences(c);
                 (c.buttons || []).forEach(remapReferences);
                 state.buttonSequences.push(c);
+                _recordAdd('buttonSequence', state.buttonSequences, c);      // ★
                 countElems++;
             }
         });
     } finally {
         state._suppressUI = prevSuppressUI;
-        state._suppressUndo = prevSuppressUndo;
     }
 
-    const afterSnap = _serializeHistory();
-    if (beforeSnap !== afterSnap) {
-        state._undoStack = state._undoStack || [];
-        state._redoStack = state._redoStack || [];
-        state._undoStack.push(beforeSnap);
-        while (state._undoStack.length > 50) state._undoStack.shift();
-        state._redoStack.length = 0;
-    }
-    state._lastSavedSnapshot = _serializeHistory();
+    _flushSessionUndo();     // ★ 合并成一条 batch
 
     rebuildSpatialIndex();
     updateCanvasRangeFromSize();

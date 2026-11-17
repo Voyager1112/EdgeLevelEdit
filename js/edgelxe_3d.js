@@ -294,7 +294,8 @@ function render3D() {
     const staticBoxGeo = new THREE.BoxGeometry(blockSize - gap, blockSize - gap, blockSize - gap);
     const staticBlocksToRender = [];
     for (let z = 0; z < h; z++) {
-        const layer = state.staticBlocks[z] || Array.from({ length: l }, () => Array(w).fill(null));
+        const layer = state.staticBlocks[z];
+        if (!layer) continue;
         for (let y = 0; y < l; y++) {
             for (let x = 0; x < w; x++) {
                 const block = layer[y] && layer[y][x];

@@ -33,6 +33,7 @@ window.updateElementId = function(type, oldId, newId) {
 	if (!arr) return;
 	const elem = arr.find(m => m.id === oldId);
 	if (!elem) return;
+    const before = _cloneDeep(elem);
 	// 从全局集合中移除自己的旧ID
 	if (elem.id) allIds.delete(elem.id);
 	let candidate = newId.trim();
@@ -58,6 +59,7 @@ window.updateElementId = function(type, oldId, newId) {
 	if (state.selectedElement && state.selectedElement.type === type && state.selectedElement.id === oldId) {
 		state.selectedElement.id = candidate;
 	}
+    _recordSet(type, elem, before);
 	requestRender();
 	updatePanel();
 	updateElemList();
@@ -252,6 +254,7 @@ function newProject() {
 		newStatic[z] = Array.from({ length: l }, () => Array(w).fill(null));
 	}
 	state.staticBlocks = newStatic;
+    state._staticCounts = {};
 
 	// 重置所有元素数组
 	state.movingPlatforms = [];
@@ -301,9 +304,9 @@ function newProject() {
     // ★ 重置撤销历史
     state._undoStack = [];
     state._redoStack = [];
-    state._lastSavedSnapshot = _serializeHistory();
 
-	syncLevelUI();
+	_markAllDirty();
+    syncLevelUI();
 	updateLayerMax();
 	requestRender();
 	updatePanel();
@@ -428,84 +431,26 @@ function expandCanvasRangeForPoint(x, y, z) {
 }
 
 function rebuildSpatialIndex() {
-    state.spatialIndex.clear();
-    const index = state.spatialIndex;
-
-	// 辅助：写入索引，支持额外数据
-    function addEntry(key, type, id, extra) {
-        if (!index.has(key)) index.set(key, []);
-        index.get(key).push({ type, id, extra });
+  state.spatialIndex.clear();
+  const add = (el, type) => {
+    const entries = _collectIndexEntries(el, type);
+    for (const e of entries) {
+      if (!state.spatialIndex.has(e.key)) state.spatialIndex.set(e.key, []);
+      state.spatialIndex.get(e.key).push({ type: e.type, id: e.id, extra: e.extra });
     }
-
-    // 移动平台（含起点）
-    state.movingPlatforms.forEach(m => {
-        const p = getMovingPos(m);
-        if (p && typeof p.x === 'number') {
-            addEntry(`${p.x},${p.y},${p.z}`, 'moving', m.id);
-        }
-    });
-
-    // 路点（跳过起点，因为已包含）
-    state.movingPlatforms.forEach(m => {
-        if (m.waypoints) {
-            m.waypoints.forEach((wp, idx) => {
-                if (idx === 0) return;
-                if (wp.x !== undefined) {
-                    addEntry(`${wp.x},${wp.y},${wp.z}`, 'waypoint', null, { idx, parentId: m.id, z: wp.z });
-                }
-            });
-        }
-    });
-
-    // 掉落平台
-    state.fallingPlatforms.forEach(m => addEntry(`${m.x},${m.y},${m.z}`, 'falling', m.id));
-    // 棱柱
-    state.prisms.forEach(m => addEntry(`${m.x},${m.y},${m.z}`, 'prism', m.id));
-    // 尺寸调整器
-    state.resizers.forEach(m => addEntry(`${m.x},${m.y},${m.z}`, 'resizer', m.id));
-    // 撞击器
-    state.bumpers.forEach(m => addEntry(`${m.x},${m.y},${m.z}`, 'bumper', m.id));
-    // 存档点
-    state.checkpoints.forEach(m => addEntry(`${m.x},${m.y},${m.z}`, 'checkpoint', m.id));
-    // 相机触发器
-    state.cameraTriggers.forEach(m => addEntry(`${m.x},${m.y},${m.z}`, 'cameratrigger', m.id));
-    // 普通按钮
-    state.buttons.forEach(m => {
-        let pos = { x: m.x, y: m.y, z: m.z };
-        if (m.movingPlatformID) {
-            const mp = state.movingPlatforms.find(p => p.id === m.movingPlatformID || p.xmlId === m.movingPlatformID);
-            if (mp) pos = getMovingPos(mp);
-        }
-        if (pos && typeof pos.x === 'number') {
-            addEntry(`${pos.x},${pos.y},${pos.z}`, 'button', m.id);
-        }
-    });
-    // 序列子按钮
-    state.buttonSequences.forEach(seq => {
-        if (!seq.buttons) return;
-        seq.buttons.forEach(btn => {
-            let pos = null;
-            if (btn.movingPlatformID) {
-                const mp = state.movingPlatforms.find(p => p.id === btn.movingPlatformID || p.xmlId === btn.movingPlatformID);
-                if (mp) pos = getMovingPos(mp);
-            } else if (btn.position) {
-                pos = btn.position;
-            }
-            if (pos && typeof pos.x === 'number') {
-                addEntry(`${pos.x},${pos.y},${pos.z}`, 'seqbutton', btn.id);
-            }
-        });
-    });
-    // OtherCube（触发点和立方体位置）
-    state.otherCubes.forEach(m => {
-        addEntry(`${m.triggerX},${m.triggerY},${m.triggerZ}`, 'othercube_trigger', m.id);
-        addEntry(`${m.cubeX},${m.cubeY},${m.cubeZ}`, 'othercube_cube', m.id);
-    });
-    // DarkCube
-    state.darkCubes.forEach(m => {
-        addEntry(`${m.triggerX},${m.triggerY},${m.triggerZ}`, 'darkcube_trigger', m.id);
-        addEntry(`${m.cubeX},${m.cubeY},${m.cubeZ}`, 'darkcube_cube', m.id);
-    });
+    _spatialEntries.set(el, entries);
+  };
+  state.movingPlatforms.forEach(m => add(m, 'moving'));
+  state.fallingPlatforms.forEach(m => add(m, 'falling'));
+  state.prisms.forEach(m => add(m, 'prism'));
+  state.resizers.forEach(m => add(m, 'resizer'));
+  state.bumpers.forEach(m => add(m, 'bumper'));
+  state.checkpoints.forEach(m => add(m, 'checkpoint'));
+  state.cameraTriggers.forEach(m => add(m, 'cameratrigger'));
+  state.buttons.forEach(m => add(m, 'button'));
+  state.buttonSequences.forEach(seq => { if (seq.buttons) seq.buttons.forEach(btn => add(btn, 'seqbutton')); });
+  state.otherCubes.forEach(m => add(m, 'othercube'));
+  state.darkCubes.forEach(m => add(m, 'darkcube'));
 }
 
 function generateInternalId(prefix) {
@@ -594,6 +539,7 @@ window.updateXmlId = function(internalId, type, newId) {
 	const arr = getArrayByType(type);
 	const elem = arr.find(e => e.id === internalId);
 	if (!elem) return;
+    const before = _cloneDeep(elem);
 	let val = newId.trim();
 	if (val) {
 		if (!/^[a-zA-Z0-9]+$/.test(val)) { showToast('ID只能包含字母和数字'); return; }
@@ -626,6 +572,7 @@ window.updateXmlId = function(internalId, type, newId) {
 	} else {
 		delete elem.xmlId;
 	}
+    _recordSet(type, elem, before);
 	requestRender();
 	updatePanel();
 	updateElemList();
@@ -637,6 +584,7 @@ window.syncXmlId = function(internalId, type) {
 	const arr = getArrayByType(type);
 	const elem = arr.find(e => e.id === internalId);
 	if (!elem) return;
+    const before = _cloneDeep(elem);
 	let val = elem.id;
 	let counter = 0;
 	let candidate = val;
@@ -645,6 +593,7 @@ window.syncXmlId = function(internalId, type) {
 		candidate = val + 'a'.repeat(counter);
 	}
 	elem.xmlId = candidate;
+    _recordSet(type, elem, before);
 	requestRender();
 	updatePanel();
 	updateElemList();
@@ -657,9 +606,10 @@ window.updateButtonSequenceButtonXmlId = function(parentId, idx, newId) {
 	if (!parent || !parent.buttons || idx >= parent.buttons.length) return;
 	const btn = parent.buttons[idx];
 	let val = newId.trim();
+
 	if (val) {
 		if (!/^[a-zA-Z0-9]+$/.test(val)) { showToast('ID只允许字母数字'); return; }
-		// 检查所有按钮（普通按钮和所有序列子按钮）的xmlId
+		// 检查所有按钮（普通按钮和所有序列子按钮）的 xmlId
 		const allButtonXmlIds = new Set();
 		state.buttons.forEach(b => { if (b.xmlId) allButtonXmlIds.add(b.xmlId); });
 		state.buttonSequences.forEach(seq => {
@@ -671,10 +621,14 @@ window.updateButtonSequenceButtonXmlId = function(parentId, idx, newId) {
 			showToast('ID已存在，请修改');
 			return;
 		}
-		btn.xmlId = val;
-	} else {
-		btn.xmlId = '';
 	}
+
+	// ★ 通过所有校验后才抓 before 并记录
+	const before = _cloneDeep(parent);
+	if (val) btn.xmlId = val;
+	else btn.xmlId = '';
+	_recordSet('buttonSequence', parent, before);
+
 	requestRender();
 	uniInterface();
 	updatePanel();
@@ -686,6 +640,9 @@ window.syncButtonSequenceButtonXmlId = function(parentId, idx) {
 	const parent = state.buttonSequences.find(b => b.id === parentId);
 	if (!parent || !parent.buttons || idx >= parent.buttons.length) return;
 	const btn = parent.buttons[idx];
+
+	const before = _cloneDeep(parent);
+
 	let val = btn.id;
 	let counter = 0;
 	let candidate = val;
@@ -694,6 +651,9 @@ window.syncButtonSequenceButtonXmlId = function(parentId, idx) {
 		candidate = val + 'a'.repeat(counter);
 	}
 	btn.xmlId = candidate;
+
+	_recordSet('buttonSequence', parent, before);
+
 	uniInterface();
 	updatePanel();
 	showToast('已同步ID');
@@ -2511,6 +2471,7 @@ window.splitWaypoint = async function(movingId, idx) {
         showToast('请输入大于1的整数');
         return;
     }
+    const before = _cloneDeep(m);
 
     const prev = m.waypoints[idx - 1];
     const cur = m.waypoints[idx];
@@ -2549,6 +2510,8 @@ window.splitWaypoint = async function(movingId, idx) {
 
     // 在 cur 之前插入所有中间点
     m.waypoints.splice(idx, 0, ...newPoints);
+    
+    _recordSet('moving', m, before);
 
     rebuildSpatialIndex();
     updatePanel();

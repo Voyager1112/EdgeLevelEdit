@@ -152,6 +152,7 @@ const state = {
     },
     _hasUnsavedChanges: false, // ★ 新增：记录是否有未保存改动
     _lastSelectionBox: null,   // ★ 最近一次框选范围 {minX,minY,minZ,maxX,maxY,maxZ}
+    _staticCounts: {},   // { z: 该层方块数 }
 };
 
 // 渲染节流
@@ -189,7 +190,418 @@ const levelFovInput = document.getElementById('levelFov');
 const modelThemeInput = document.getElementById('modelTheme');
 const fileXmlInput = document.getElementById('fileXmlInput');
 
-// ★ 新增：获取或按需创建层
+// ============ 静态方块计数 ============
+function _adjustStaticCount(z, delta) {
+    if (!state._staticCounts) state._staticCounts = {};
+    const k = String(z);
+    const v = (state._staticCounts[k] || 0) + delta;
+    if (v > 0) state._staticCounts[k] = v;
+    else delete state._staticCounts[k];
+}
+
+// 全量重算（加载 / 新建 / 撤销后使用，O(方块数) 不是 O(W·L·H)）
+function _recalcStaticCounts() {
+    const counts = {};
+    for (const zKey in state.staticBlocks) {
+        const layer = state.staticBlocks[zKey];
+        if (!layer) continue;
+        let n = 0;
+        for (let y = 0; y < layer.length; y++) {
+            const row = layer[y];
+            if (!row) continue;
+            for (let x = 0; x < row.length; x++) {
+                if (row[x]) n++;
+            }
+        }
+        if (n > 0) counts[zKey] = n;
+    }
+    state._staticCounts = counts;
+}
+
+// ============================================================
+// ★ 撤销/重做 + 空间索引增量 + 缓存脏标记
+// ============================================================
+const UNDO_MAX_STEPS = 100;
+
+function _cloneDeep(o) { return JSON.parse(JSON.stringify(o)); }
+
+function _recordStep(step) {
+	//if (state._suppressUI) return;
+    if (state._suppressUndo) return;
+	if (!state._undoStack) state._undoStack = [];
+	if (!state._redoStack) state._redoStack = [];
+	state._undoStack.push(step);
+	if (state._undoStack.length > UNDO_MAX_STEPS) state._undoStack.shift();
+	state._redoStack.length = 0;
+}
+
+// 画笔/添加模式 session：把 session 期间的所有步骤合成一条 batch
+// 用法：mousedown/touchstart 时 state._sessionMarker = 当前栈长度
+//      handleCanvasLeave 时 _flushSessionUndo()
+function _flushSessionUndo() {
+    if (state._sessionMarker === null || state._sessionMarker === undefined) return;
+    const marker = state._sessionMarker;
+    state._sessionMarker = null;
+    if (!state._undoStack) return;
+    const n = state._undoStack.length - marker;
+    if (n <= 1) return;   // 0 或 1 条无需合并（1 条 = 只画了一格，独立撤销合理）
+    const items = state._undoStack.splice(marker, n);
+    state._undoStack.push({ kind: 'batch', items });
+    // _redoStack 已被 _recordStep 每次清空，无需处理
+}
+
+function _restoreProps(target, src) {
+	for (const k of Object.keys(target)) if (!(k in src)) delete target[k];
+	Object.assign(target, src);
+}
+
+function _ensureLayer(z) {
+	if (!state.staticBlocks[z]) {
+		const { w, l } = state.level.size;
+		state.staticBlocks[z] = Array.from({ length: l }, () => Array(w).fill(null));
+	}
+	return state.staticBlocks[z];
+}
+
+// ============ 撤销应用（唯一需要认识所有 step kind 的地方） ============
+function _applyStep(s, dir) {
+    const src = dir === 'undo' ? s.before : s.after;
+    switch (s.kind) {
+        case 'set':
+            _restoreProps(s.target, src);
+            if (s.type) _markDirty(s.type);                                    // ★ 只标脏这一类型
+            break;
+
+        case 'add':
+            if (dir === 'undo') {
+                const i = s.array.indexOf(s.target);
+                if (i !== -1) s.array.splice(i, 1);
+            } else if (s.array.indexOf(s.target) === -1) {
+                s.array.splice(s.index, 0, s.target);
+            }
+            if (s.type) _markDirty(s.type);                                    // ★
+            break;
+
+        case 'remove':
+            if (dir === 'undo') {
+                if (s.array.indexOf(s.target) === -1) s.array.splice(s.index, 0, s.target);
+                (s.effects || []).forEach(e => _restoreProps(e.target, e.before));
+            } else {
+                const i = s.array.indexOf(s.target);
+                if (i !== -1) s.array.splice(i, 1);
+                (s.effects || []).forEach(e => _restoreProps(e.target, e.after));
+            }
+            if (s.type) _markDirty(s.type);                                    // ★
+            (s.effects || []).forEach(e => { if (e.type) _markDirty(e.type); });// ★
+            break;
+
+        case 'static': {
+            const willHave = !!src;
+            if (!willHave) {
+                // 撤销添加 / 重做删除：只删已存在的格，不创建层
+                const layer = state.staticBlocks[s.z];
+                if (layer && layer[s.y] && layer[s.y][s.x]) {
+                    layer[s.y][s.x] = null;
+                    _adjustStaticCount(s.z, -1);
+                    _markDirty(`layer_${s.z}`);                                // ★ 只标脏这一层
+                }
+            } else {
+                // 撤销删除 / 重做添加
+                const layer = _ensureLayer(s.z);
+                if (!layer[s.y]) layer[s.y] = Array(state.level.size.w).fill(null);
+                const hadBefore = !!layer[s.y][s.x];
+                layer[s.y][s.x] = { ...src };
+                if (!hadBefore) _adjustStaticCount(s.z, 1);
+                _markDirty(`layer_${s.z}`);                                    // ★
+            }
+            break;
+        }
+
+        case 'layerClear':
+            if (dir === 'undo') {
+                state.staticBlocks[s.z] = _cloneDeep(s.before);
+                let n = 0;
+                for (let y = 0; y < s.before.length; y++) {
+                    const row = s.before[y];
+                    if (!row) continue;
+                    for (let x = 0; x < row.length; x++) if (row[x]) n++;
+                }
+                if (n > 0) state._staticCounts[s.z] = n;
+                else delete state._staticCounts[s.z];
+            } else {
+                delete state.staticBlocks[s.z];
+                delete state._staticCounts[s.z];
+            }
+            _markDirty(`layer_${s.z}`);                                        // ★
+            break;
+
+        case 'layer':
+            state.currentLayer = src;
+            layerInput.value = src;
+            // 不标脏（只是当前层指针，不是数据）
+            break;
+
+        case 'batch': {
+            const list = dir === 'undo' ? [...s.items].reverse() : s.items;
+            list.forEach(it => _applyStep(it, dir));                            // 递归，每步自己标脏
+            break;
+        }
+    }
+}
+
+window.undo = function () {
+	if (!state._undoStack || !state._undoStack.length) { showToast('没有可撤销的操作'); return; }
+	const s = state._undoStack.pop();
+	_applyStep(s, 'undo');
+	state._redoStack.push(s);
+	_afterUndoRedo();
+	showToast('已撤销');
+};
+
+window.redo = function () {
+	if (!state._redoStack || !state._redoStack.length) { showToast('没有可重做的操作'); return; }
+	const s = state._redoStack.pop();
+	_applyStep(s, 'redo');
+	state._undoStack.push(s);
+	_afterUndoRedo();
+	showToast('已重做');
+};
+
+function _afterUndoRedo() {
+	rebuildSpatialIndex();   // 撤销可能一次动多个元素，保守全量重建
+	_validateSelectedElement();
+	requestRender();
+	if (typeof threeScene !== 'undefined' && threeScene) render3D();
+	updatePanel(); updateElemList(); updateStatus();
+	//_markAllDirty();
+	saveCache();
+}
+
+// ============ 空间索引增量 ============
+const _spatialEntries = new WeakMap();
+
+function _collectIndexEntries(el, type) {
+	const out = [];
+	const push = (key, t, id, extra) => out.push({ key, type: t, id, extra });
+	switch (type) {
+		case 'moving': {
+			const p = getMovingPos(el);
+			if (p && typeof p.x === 'number') push(`${p.x},${p.y},${p.z}`, 'moving', el.id);
+			if (el.waypoints) el.waypoints.forEach((wp, idx) => {
+				if (idx === 0) return;
+				if (wp.x !== undefined) push(`${wp.x},${wp.y},${wp.z}`, 'waypoint', null, { idx, parentId: el.id, z: wp.z });
+			});
+			break;
+		}
+		case 'falling': case 'prism': case 'resizer':
+		case 'bumper': case 'checkpoint': case 'cameratrigger':
+			if (typeof el.x === 'number') push(`${el.x},${el.y},${el.z}`, type, el.id);
+			break;
+		case 'button': {
+			let pos = { x: el.x, y: el.y, z: el.z };
+			if (el.movingPlatformID) {
+				const mp = state.movingPlatforms.find(p => p.id === el.movingPlatformID || p.xmlId === el.movingPlatformID);
+				if (mp) pos = getMovingPos(mp);
+			}
+			if (pos && typeof pos.x === 'number') push(`${pos.x},${pos.y},${pos.z}`, 'button', el.id);
+			break;
+		}
+		case 'seqbutton': {
+			let pos = null;
+			if (el.movingPlatformID) {
+				const mp = state.movingPlatforms.find(p => p.id === el.movingPlatformID || p.xmlId === el.movingPlatformID);
+				if (mp) pos = getMovingPos(mp);
+			} else if (el.position) pos = el.position;
+			if (pos && typeof pos.x === 'number') push(`${pos.x},${pos.y},${pos.z}`, 'seqbutton', el.id);
+			break;
+		}
+		case 'othercube':
+			push(`${el.triggerX},${el.triggerY},${el.triggerZ}`, 'othercube_trigger', el.id);
+			push(`${el.cubeX},${el.cubeY},${el.cubeZ}`, 'othercube_cube', el.id);
+			break;
+		case 'darkcube':
+			push(`${el.triggerX},${el.triggerY},${el.triggerZ}`, 'darkcube_trigger', el.id);
+			push(`${el.cubeX},${el.cubeY},${el.cubeZ}`, 'darkcube_cube', el.id);
+			break;
+	}
+	return out;
+}
+
+function _removeFromIndex(el) {
+	const entries = _spatialEntries.get(el);
+	if (!entries) return;
+	for (const e of entries) {
+		const list = state.spatialIndex.get(e.key);
+		if (!list) continue;
+		const i = list.findIndex(x => x.type === e.type && x.id === e.id
+			&& x.extra?.idx === e.extra?.idx
+			&& x.extra?.parentId === e.extra?.parentId);
+		if (i !== -1) list.splice(i, 1);
+		if (list.length === 0) state.spatialIndex.delete(e.key);
+	}
+	_spatialEntries.delete(el);
+}
+
+function _addToIndex(el, type) {
+	const entries = _collectIndexEntries(el, type);
+	for (const e of entries) {
+		if (!state.spatialIndex.has(e.key)) state.spatialIndex.set(e.key, []);
+		state.spatialIndex.get(e.key).push({ type: e.type, id: e.id, extra: e.extra });
+	}
+	_spatialEntries.set(el, entries);
+}
+
+function _refreshIndex(el, type) { _removeFromIndex(el); _addToIndex(el, type); }
+
+function _refreshSeqButtonsIndex(seq) {
+	if (!seq.buttons) return;
+	seq.buttons.forEach(btn => _refreshIndex(btn, 'seqbutton'));
+}
+
+function _refreshButtonsBoundTo(mp) {
+	const id1 = mp.id, id2 = mp.xmlId;
+	if (!id1 && !id2) return;
+	state.buttons.forEach(btn => {
+		if (btn.movingPlatformID === id1 || btn.movingPlatformID === id2) _refreshIndex(btn, 'button');
+	});
+	state.buttonSequences.forEach(seq => {
+		if (seq.buttons) seq.buttons.forEach(sb => {
+			if (sb.movingPlatformID === id1 || sb.movingPlatformID === id2) _refreshIndex(sb, 'seqbutton');
+		});
+	});
+}
+
+// ============ 缓存脏标记 ============
+const _dirtyKeys = new Set();
+function _markDirty(...keys) { keys.forEach(k => _dirtyKeys.add(k)); }
+function _markAllDirty() {
+	_markDirty('meta', 'moving', 'falling', 'prism', 'resizer', 'bumper',
+		'checkpoint', 'cameratrigger', 'button', 'buttonSequence',
+		'othercube', 'darkcube', 'unknown');
+	for (const z in state.staticBlocks) _markDirty(`layer_${z}`);
+}
+
+// ============ 三个统一入口 ============
+function _recordSet(type, el, before) {
+	_recordStep({ kind: 'set', target: el, type, before, after: _cloneDeep(el) });
+    if (type === 'buttonSequence') {
+		if (el.buttons) el.buttons.forEach(btn => _refreshIndex(btn, 'seqbutton'));
+	} else {
+		_refreshIndex(el, type);
+	}
+	_markDirty(type);
+	if (type === 'moving') { _refreshButtonsBoundTo(el); _markDirty('button', 'buttonSequence'); }
+}
+
+function _recordAdd(type, arr, el) {
+	_recordStep({ kind: 'add', array: arr, index: arr.length - 1, target: el, type });
+	_addToIndex(el, type);
+	_markDirty(type);
+	if (type === 'moving') { _refreshButtonsBoundTo(el); _markDirty('button', 'buttonSequence'); }
+}
+
+function _recordRemove(type, arr, el, effects) {
+	const idx = arr.indexOf(el);
+	if (idx === -1) return;
+	arr.splice(idx, 1);
+	_recordStep({ kind: 'remove', array: arr, index: idx, target: el, effects, type });
+	_removeFromIndex(el);
+	_markDirty(type);
+	(effects || []).forEach(e => {
+		_markDirty(e.type);
+		if (e.type === 'seqbutton') {
+			for (const seq of state.buttonSequences) {
+				if (seq.buttons && seq.buttons.includes(e.target)) { _refreshSeqButtonsIndex(seq); break; }
+			}
+		} else if (e.type === 'buttonSequence') {
+			if (e.target.buttons) e.target.buttons.forEach(btn => _refreshIndex(btn, 'seqbutton'));
+		} else {
+			_refreshIndex(e.target, e.type);
+		}
+	});
+}
+
+// 只抓取「真正会被 cleanReferences 波及」的元素，避免每次删元素都 clone 全部
+function _snapshotDeleteEffects(ids) {
+	const idSet = new Set(Array.isArray(ids) ? ids.filter(Boolean) : [ids].filter(Boolean));
+	const effects = [];
+	const snap = (el, type) => effects.push({ target: el, type, before: _cloneDeep(el) });
+
+	const hasRef = (str) => {
+		if (!str || idSet.size === 0) return false;
+		if (typeof isAffectIdPresent === 'function') {
+			for (const id of idSet) if (isAffectIdPresent(str, id)) return true;
+			return false;
+		}
+		const items = str.split(',').map(s => s.trim()).filter(s => s);
+		for (const item of items) {
+			const m = item.match(/^([^(]+)(\([^)]*\))?$/);
+			if (m && idSet.has(m[1].trim())) return true;
+		}
+		return false;
+	};
+	const hasId = (v) => !!v && idSet.has(v);
+
+	state.buttons.forEach(b => {
+		if (hasId(b.movingPlatformID) || hasRef(b.affectMoving) || hasRef(b.affectBumpers) || hasRef(b.affectButtons)) snap(b, 'button');
+	});
+	state.buttonSequences.forEach(seq => {
+		if (hasRef(seq.affectMoving) || hasRef(seq.affectBumpers) || hasRef(seq.affectButtons)) snap(seq, 'buttonSequence');
+		if (seq.buttons) seq.buttons.forEach(sb => {
+			if (hasId(sb.movingPlatformID) || hasRef(sb.affectMoving) || hasRef(sb.affectBumpers) || hasRef(sb.affectButtons)) snap(sb, 'seqbutton');
+		});
+	});
+	state.otherCubes.forEach(oc => { if (hasId(oc.movingBlockSync)) snap(oc, 'othercube'); });
+	state.darkCubes.forEach(dc => { if (hasId(dc.movingBlockSync)) snap(dc, 'darkcube'); });
+	state.movingPlatforms.forEach(mp => { if (hasId(mp.relatedTo)) snap(mp, 'moving'); });
+
+	return effects;
+}
+
+function _dropLayerIndex(z) {
+	for (const [key, list] of state.spatialIndex) {
+		const filtered = list.filter(e => !(e.extra && e.extra.z === z));
+		if (filtered.length === 0) state.spatialIndex.delete(key);
+		else if (filtered.length !== list.length) state.spatialIndex.set(key, filtered);
+	}
+}
+
+// 撤销/重做统一验证已选元素是否还存在
+function _validateSelectedElement() {
+	const sel = state.selectedElement;
+	if (!sel) return;
+	if (sel.type === 'static') {
+		const c = sel.staticCoord;
+		const layer = state.staticBlocks[c.z];
+		if (!layer || !layer[c.y] || !layer[c.y][c.x]) state.selectedElement = null;
+		return;
+	}
+	if (sel.type === 'seqbutton') {
+		let found = false;
+		for (const seq of state.buttonSequences) {
+			if (seq.buttons && seq.buttons.some(b => b.id === sel.id)) { found = true; break; }
+		}
+		if (!found) state.selectedElement = null;
+		return;
+	}
+	const arrays = {
+		moving: state.movingPlatforms, falling: state.fallingPlatforms,
+		prism: state.prisms, resizer: state.resizers, bumper: state.bumpers,
+		checkpoint: state.checkpoints, cameratrigger: state.cameraTriggers,
+		button: state.buttons, buttonsequence: state.buttonSequences,
+		othercube: state.otherCubes, darkcube: state.darkCubes,
+		othercube_trigger: state.otherCubes, othercube_cube: state.otherCubes,
+		darkcube_trigger: state.darkCubes, darkcube_cube: state.darkCubes,
+	};
+	const arr = arrays[sel.type];
+	if (!arr || !arr.some(e => e.id === sel.id)) state.selectedElement = null;
+}
+
+// ============================================================
+// ★ 原有业务逻辑（改写）
+// ============================================================
+
+// ★ 获取或按需创建层
 function getOrCreateLayer(z) {
     if (!state.staticBlocks[z]) {
         const { w, l } = state.level.size;
@@ -197,13 +609,38 @@ function getOrCreateLayer(z) {
     }
     return state.staticBlocks[z];
 }
+
+// 内部函数：删一个静态方块（带撤销）
+function _deleteStaticAt(sx, sy, sz) {
+	const layer = state.staticBlocks[sz];
+	if (!layer || !layer[sy] || !layer[sy][sx]) return false;
+	const before = { ...layer[sy][sx] };
+	layer[sy][sx] = null;
+	_recordStep({ kind: 'static', x: sx, y: sy, z: sz, before, after: null });
+	_markDirty(`layer_${sz}`);
+    _adjustStaticCount(sz, -1);
+	if (state.selectedElement && state.selectedElement.type === 'static' &&
+		state.selectedElement.staticCoord.x === sx &&
+		state.selectedElement.staticCoord.y === sy &&
+		state.selectedElement.staticCoord.z === sz) {
+		state.selectedElement = null;
+	}
+	return true;
+}
+
+// 内部函数：放置一个静态方块（带撤销）
+function _placeStaticAt(sx, sy, sz, color) {
+	const layer = _ensureLayer(sz);
+	if (!layer || !layer[sy]) return false;
+	layer[sy][sx] = { r: color.r, g: color.g, b: color.b };
+	_recordStep({ kind: 'static', x: sx, y: sy, z: sz, before: null, after: { ...color } });
+	_markDirty(`layer_${sz}`);
+    _adjustStaticCount(sz, 1);
+	return true;
+}
+
 /**
  * 处理像素点击（由事件委托调用）
- * @param {number} x - 格子 X 坐标
- * @param {number} y - 格子 Y 坐标
- * @param {number} z - 当前层
- * @param {string|null} staticCoord - 静态方块的坐标字符串 "x,y,z" 或 null
- * @param {string|null} elemIdsStr - 元素 ID 列表的 JSON 字符串或 null
  */
 function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
     // 多选工具交给 edgelxe_select.js
@@ -232,9 +669,7 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
             if (staticCoord && state.visibility.static) {
                 const parts = staticCoord.split(',').map(s => parseInt(s.trim()));
                 if (parts.length === 3) {
-                    const layer = state.staticBlocks[parts[2]];
-                    if (layer && layer[parts[1]] && layer[parts[1]][parts[0]]) {
-                        layer[parts[1]][parts[0]] = null;
+                    if (_deleteStaticAt(parts[0], parts[1], parts[2])) {
                         requestRender();
                         updatePanel();
                         updateStatus();
@@ -251,13 +686,12 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
                 if (x < 0 || x >= state.level.size.w ||
                     y < 0 || y >= state.level.size.l ||
                     z < 0 || z >= state.level.size.h) return;
-                const layer = state.staticBlocks[z] || getOrCreateLayer(z);   // ★ 按需建层
-                if (!layer) return;
                 const color = state.staticColor || getStaticDefault(z);
-                layer[y][x] = { r: color.r, g: color.g, b: color.b };
-                requestRender();
-                updateStatus();
-                uniInterface();
+                if (_placeStaticAt(x, y, z, color)) {
+                    updatePixelAt(x, y, z);
+                    updateStatus();
+                    uniInterface();
+                }
             },
             'moving': () => placeMoving(x, y, z),
             'falling': () => placeFalling(x, y, z),
@@ -270,7 +704,24 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
             'button': () => placeButton(x, y, z),
             'seqbutton': () => placeSequenceButton(x, y, z),
             'othercube': () => placeOtherCube(x, y, z),
-            'darkcube': () => placeDarkCube(x, y, z)
+            'darkcube': () => placeDarkCube(x, y, z),
+            'waypoint': () => {                                        // ★ 新增
+                if (!state.selectedElement || state.selectedElement.type !== 'moving') {
+                    showToast('请先选中一个移动平台');
+                    return;
+                }
+                const m = state.movingPlatforms.find(p => p.id === state.selectedElement.id);
+                if (!m) return;
+                const allEntries = getEntriesAt(x, y, z);
+                const wpEntry = allEntries.find(e => e.type === 'waypoint' && e.data);
+                if (wpEntry) {
+                    state.selectedWaypoint = { movingId: wpEntry.data.parentId, idx: wpEntry.data.idx };
+                    showToast(`选中路点 #${wpEntry.data.idx + 1}`);
+                    requestRender(); updatePanel();
+                    return;
+                }
+                addWaypointAt(m, x, y, z);
+            },
         };
         const fn = toolMap[state.currentTool];
         if (fn) fn();
@@ -293,8 +744,7 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
         const m = state.movingPlatforms.find(p => p.id === state.selectedElement.id);
         if (!m) return;
 
-        // ★ 用 getEntriesAt 直接查询当前格的路点
-        // （调用方传入的 elemIdsStr 已经被过滤掉了 waypoint）
+        // 用 getEntriesAt 直接查询当前格的路点
         const allEntries = (typeof getEntriesAt === 'function')
             ? getEntriesAt(x, y, z)
             : [];
@@ -347,24 +797,15 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
             if (visibleIds.length > 1) {
                 // 多个可见元素 → 弹出选择对话框
                 const items = visibleIds.map(item => {
-                    let desc = '';
                     const typeMap = {
-                        'moving': '移动平台',
-                        'falling': '掉落平台',
-                        'prism': '棱柱',
-                        'resizer': '尺寸调整器',
-                        'bumper': '撞击器',
-                        'checkpoint': '存档点',
-                        'cameratrigger': '相机触发',
-                        'button': '按钮',
-                        'othercube_trigger': '提示触发',
-                        'othercube_cube': '提示方块',
-                        'darkcube_trigger': '黑暗触发',
-                        'darkcube_cube': '黑暗方块',
+                        'moving': '移动平台', 'falling': '掉落平台', 'prism': '棱柱',
+                        'resizer': '尺寸调整器', 'bumper': '撞击器', 'checkpoint': '存档点',
+                        'cameratrigger': '相机触发', 'button': '按钮',
+                        'othercube_trigger': '提示触发', 'othercube_cube': '提示方块',
+                        'darkcube_trigger': '黑暗触发', 'darkcube_cube': '黑暗方块',
                         'seqbutton': '序列子按钮'
                     };
-                    desc = (typeMap[item.type] || item.type) + ' #' + item.id;
-                    return { type: item.type, desc, data: item };
+                    return { type: item.type, desc: (typeMap[item.type] || item.type) + ' #' + item.id, data: item };
                 });
                 showSelectDialog(items, (selected) => {
                     selectElement(selected.type, selected.data.id);
@@ -412,6 +853,7 @@ function handlePixelClick(x, y, z, staticCoord, elemIdsStr) {
 
 function addWaypointAt(m, x, y, z) {
     if (!m.waypoints) m.waypoints = [];
+    const before = _cloneDeep(m);
     const keep = state.keepPrevProps;
     let newWp = { x, y, z, travelTime: 0, pauseTime: 0 };
     if (keep && m.waypoints.length > 0) {
@@ -421,6 +863,7 @@ function addWaypointAt(m, x, y, z) {
         newWp.pauseTime = 0;
     }
     m.waypoints.push(newWp);
+    _recordSet('moving', m, before);
     expandCanvasRangeForPoint(x, y, z);
     uniInterface();
     requestRender();
@@ -438,26 +881,8 @@ function setMovingPos(m, x, y, z) {
 	}
 }
 
-
-/*function initStaticBlocks() {
-	const { w, l, h } = state.level.size;
-	for (let z = 0; z < h; z++) {
-		if (!state.staticBlocks[z]) {
-			state.staticBlocks[z] = Array.from({ length: l }, () => Array(w).fill(null));
-		} else {
-			const layer = state.staticBlocks[z];
-			for (let y = 0; y < l; y++) {
-				if (!layer[y]) layer[y] = Array(w).fill(null);
-				else if (layer[y].length < w) {
-					for (let x = layer[y].length; x < w; x++) layer[y][x] = null;
-				}
-			}
-			while (layer.length < l) layer.push(Array(w).fill(null));
-		}
-	}
-}*/
 function initStaticBlocks() {
-    // ★ 不再主动为每一层创建空数组，保留按需创建
+    // 不再主动为每一层创建空数组，保留按需创建
     const { w, l, h } = state.level.size;
     // 清理超出 h 的层
     for (let z in state.staticBlocks) {
@@ -533,34 +958,15 @@ function applyLevel() {
 	state.level.fov = fovVal;
 	
 	updateCanvasRangeFromSize();
-	
-	/*const newStatic = {};
-	for (let z = 0; z < h; z++) {
-		const oldLayer = state.staticBlocks[z] || [];
-		const newLayer = Array.from({ length: l }, () => Array(w).fill(null));
-		for (let y = 0; y < Math.min(l, oldLayer.length); y++) {
-			for (let x = 0; x < Math.min(w, oldLayer[y]?.length || 0); x++) {
-				newLayer[y][x] = oldLayer[y][x] || null;
-			}
-		}
-		newStatic[z] = newLayer;
-	}
-	state.staticBlocks = newStatic;*/
 
-    // 原来是：
-    // const newStatic = {};
-    // for (let z = 0; z < h; z++) { ...创建所有层... }
-    // state.staticBlocks = newStatic;
-
-    // 改为：
+    // 静态方块按新尺寸裁剪（保留按需创建，只转换非空层）
     const newStatic = {};
     for (const zKey in state.staticBlocks) {
         const zNum = parseInt(zKey, 10);
-        if (isNaN(zNum) || zNum < 0 || zNum >= h) continue; // 超界或无效，丢弃
+        if (isNaN(zNum) || zNum < 0 || zNum >= h) continue;
         const oldLayer = state.staticBlocks[zKey];
         if (!oldLayer) continue;
 
-        // 检查是否全是空格，全空就不保留
         let hasBlock = false;
         for (let y = 0; y < oldLayer.length && !hasBlock; y++) {
             const row = oldLayer[y];
@@ -571,7 +977,6 @@ function applyLevel() {
         }
         if (!hasBlock) continue;
 
-        // 只转换非空层
         const newLayer = Array.from({ length: l }, () => Array(w).fill(null));
         for (let y = 0; y < Math.min(l, oldLayer.length); y++) {
             const srcRow = oldLayer[y];
@@ -583,8 +988,8 @@ function applyLevel() {
         newStatic[zKey] = newLayer;
     }
     state.staticBlocks = newStatic;
+    _recalcStaticCounts();
 
-	// 替换原有的 filterPosWithMax 调用为：
 	const filterPos = (arr, getPos) => arr.filter(item => {
 		const p = getPos(item);
 		return p && typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number';
@@ -598,7 +1003,6 @@ function applyLevel() {
 	state.cameraTriggers = filterPos(state.cameraTriggers, m => ({ x: m.x, y: m.y, z: m.z }));
 	state.buttons = state.buttons.filter(m => {
 		if (m.movingPlatformID) return true;
-		// 否则必须坐标有效
 		return m.x !== null && m.x !== undefined && isFinite(m.x) &&
 			   m.y !== null && m.y !== undefined && isFinite(m.y) &&
 			   m.z !== null && m.z !== undefined && isFinite(m.z);
@@ -606,10 +1010,8 @@ function applyLevel() {
 	state.otherCubes = filterPos(state.otherCubes, m => ({ x: m.triggerX, y: m.triggerY, z: m.triggerZ }));
 	state.darkCubes = filterPos(state.darkCubes, m => ({ x: m.triggerX, y: m.triggerY, z: m.triggerZ }));
 
-	//if (state.currentLayer > h) state.currentLayer = h;
 	layerInput.value = state.currentLayer;
 
-	// 在 applyLevel 中，读取 levelUseAngle 和禁用输入框
 	const useAngleEl = document.getElementById('levelUseAngle');
 	const useAngle = useAngleEl ? useAngleEl.checked : false;
 	state.levelUseAngle = useAngle;
@@ -617,21 +1019,25 @@ function applyLevel() {
 	requestRender();
 	updatePanel();
 	updateElemList();
-	// 在 applyLevel 函数末尾，saveCache 之前添加：
-	//const maxLayer = getLayerRange().maxZ;
     const maxLayer = Math.max(getLayerRange().maxZ, state.currentLayer);
 	layerInput.max = maxLayer;
-	//if (state.currentLayer > maxLayer) state.currentLayer = maxLayer;
 	layerInput.value = state.currentLayer;
 	if (threeScene) {
 		clear3DScene();
 	}
+
+	// ★ 数组引用被 filterPos 替换，撤销栈失效；作为宏观操作整体清空
+	state._undoStack = [];
+	state._redoStack = [];
+	rebuildSpatialIndex();
+	_markAllDirty();
+
 	uniInterface();
 	syncLevelUI();
 	showToast('Level 属性已应用');
 }
 
-// 橡皮擦处理（已扩展支持新元素）
+// 橡皮擦处理
 function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 	const toDelete = [];
 
@@ -654,7 +1060,9 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
         const { movingId, idx } = state.selectedWaypoint;
         const m = state.movingPlatforms.find(p => p.id === movingId);
         if (m && m.waypoints && idx > 0 && idx < m.waypoints.length) {
+            const before = _cloneDeep(m);
             m.waypoints.splice(idx, 1);
+            _recordSet('moving', m, before);
             state.selectedWaypoint = null;
             uniInterface();
             requestRender();
@@ -667,7 +1075,6 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 	if (elemIdsStr) {
 		const ids = JSON.parse(elemIdsStr);
 		ids.forEach(item => {
-			// 先检查该类型是否可见
 			let visible = true;
 			switch (item.type) {
 				case 'moving': visible = state.visibility.moving; break;
@@ -688,30 +1095,19 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 				case 'exit': visible = state.visibility.exit; break;
 				default: visible = true;
 			}
-			if (!visible) return; // 不可见，跳过
+			if (!visible) return;
 
 			let desc = '';
 			const typeMap = {
-				'moving': '移动平台',
-				'falling': '掉落平台',
-				'prism': '棱柱',
-				'resizer': '尺寸调整器',
-				'bumper': '撞击器',
-				'checkpoint': '存档点',
-				'cameratrigger': '相机触发',
-				'button': '按钮',
-				'seqbutton': '序列子按钮',
-				'othercube_trigger': '提示触发',
-				'othercube_cube': '提示方块',
-				'darkcube_trigger': '黑暗触发',
-				'darkcube_cube': '黑暗方块'
+				'moving': '移动平台', 'falling': '掉落平台', 'prism': '棱柱',
+				'resizer': '尺寸调整器', 'bumper': '撞击器', 'checkpoint': '存档点',
+				'cameratrigger': '相机触发', 'button': '按钮', 'seqbutton': '序列子按钮',
+				'othercube_trigger': '提示触发', 'othercube_cube': '提示方块',
+				'darkcube_trigger': '黑暗触发', 'darkcube_cube': '黑暗方块'
 			};
 			if (item.type === 'moving') {
 				const m = state.movingPlatforms.find(p => p.id === item.id);
-				if (m) {
-					const pos = getMovingPos(m);
-					desc = `移动平台 #${item.id} (${pos.x},${pos.y},${pos.z})`;
-				}
+				if (m) { const pos = getMovingPos(m); desc = `移动平台 #${item.id} (${pos.x},${pos.y},${pos.z})`; }
 			} else if (item.type === 'falling') {
 				const m = state.fallingPlatforms.find(p => p.id === item.id);
 				if (m) desc = `掉落平台 #${item.id} (${m.x},${m.y},${m.z})`;
@@ -736,10 +1132,7 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 			} else if (item.type === 'seqbutton') {
 				let found = false;
 				for (let seq of state.buttonSequences) {
-					if (seq.buttons && seq.buttons.some(b => b.id === item.id)) {
-						found = true;
-						break;
-					}
+					if (seq.buttons && seq.buttons.some(b => b.id === item.id)) { found = true; break; }
 				}
 				desc = `序列子按钮 #${item.id}${found ? '' : ' (已失效)'}`;
 			} else if (item.type === 'othercube_trigger' || item.type === 'othercube_cube') {
@@ -749,18 +1142,12 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 				const m = state.darkCubes.find(p => p.id === item.id);
 				if (m) desc = `黑暗方块 #${item.id} (触发:${m.triggerX},${m.triggerY},${m.triggerZ} 方块:${m.cubeX},${m.cubeY},${m.cubeZ})`;
 			}
-			if (desc) {
-				toDelete.push({ type: item.type, desc, data: item });
-			}
+			if (desc) toDelete.push({ type: item.type, desc, data: item });
 		});
 	}
 
-	// ---- 后续处理（删除逻辑不变） ----
 	if (toDelete.length === 0) {
-        // 长按/连点场景下静默跳过，不打扰
-        if (!state._addSessionActive) {
-            showToast('此处无可删除的可见元素');
-        }
+        if (!state._addSessionActive) showToast('此处无可删除的可见元素');
         return;
     }
 	
@@ -768,15 +1155,7 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 		const item = toDelete[0];
 		if (item.type === 'static') {
 			const [sx, sy, sz] = item.data;
-			const layer = state.staticBlocks[sz];
-			if (layer && layer[sy]) {
-				layer[sy][sx] = null;
-				if (state.selectedElement && state.selectedElement.type === 'static' &&
-					state.selectedElement.staticCoord.x === sx &&
-					state.selectedElement.staticCoord.y === sy &&
-					state.selectedElement.staticCoord.z === sz) {
-					state.selectedElement = null;
-				}
+			if (_deleteStaticAt(sx, sy, sz)) {
 				requestRender();
 				updatePanel();
 				updateStatus();
@@ -790,15 +1169,7 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 		showSelectDialog(toDelete, (selected) => {
 			if (selected.type === 'static') {
 				const [sx, sy, sz] = selected.data;
-				const layer = state.staticBlocks[sz];
-				if (layer && layer[sy]) {
-					layer[sy][sx] = null;
-					if (state.selectedElement && state.selectedElement.type === 'static' &&
-						state.selectedElement.staticCoord.x === sx &&
-						state.selectedElement.staticCoord.y === sy &&
-						state.selectedElement.staticCoord.z === sz) {
-						state.selectedElement = null;
-					}
+				if (_deleteStaticAt(sx, sy, sz)) {
 					requestRender();
 					updatePanel();
 					updateStatus();
@@ -812,24 +1183,21 @@ function handleEraserClick(x, y, z, staticCoord, elemIdsStr) {
 	}
 }
 
-let lastSelectedCoord = null; // 新增：记录上一次选中坐标
+let lastSelectedCoord = null;
 
 function selectElement(type, id, skipRender = false) {
     if (state._suppressUI) return;
 	if (type === 'static') {
 		const coord = parseCoord(id);
 		if (!coord) {
-			// 如果 id 不是有效的坐标字符串，则清除选中并返回
 			state.selectedElement = null;
 			showToast('无效的静态方块坐标');
 			return;
 		}
-		// 设置选中并调用 selectStatic 来确保 staticCoord 被正确设置
 		selectStatic(coord.x, coord.y, coord.z);
 		return;
 	}
     const oldCoord = lastSelectedCoord;
-    // 当前工具是"序列子按钮"时，选中的按钮序列直接作为目标
     if (state.currentTool === 'seqbutton' && type === 'buttonsequence') {
         state.seqEditingId = id;
         showToast(`序列子按钮模式：目标序列 #${id}`);
@@ -837,11 +1205,9 @@ function selectElement(type, id, skipRender = false) {
     state.selectedElement = { type, id };
 	const coord = getElementCoord(type, id);
 	if (coord) {
-		// 在3D场景中查找对应的mesh（通过meshToElement映射反向查找）
 		for (let [mesh, elem] of meshToElement) {
 			if (elem.type === type && elem.id === id) {
 				state.highlightedMesh = mesh;
-				//render3D();  // 新增此行
 				break;
 			}
 		}
@@ -868,15 +1234,8 @@ function selectElement(type, id, skipRender = false) {
         }
     }
     
-    // 清除旧选中
-    if (oldCoord) {
-        updatePixelAt(oldCoord.x, oldCoord.y, oldCoord.z);
-    }
-    if (!skipRender) {
-        // 非跳过模式，触发全量刷新（但我们的 renderGrid 已优化）
-        requestRender();
-    }
-    // 更新面板和列表（在非画笔模式下或单点模式下）
+    if (oldCoord) updatePixelAt(oldCoord.x, oldCoord.y, oldCoord.z);
+    if (!skipRender) requestRender();
     if (!skipRender) {
         updatePanel();
         updateElemList();
@@ -885,13 +1244,9 @@ function selectElement(type, id, skipRender = false) {
 }
 
 function getElementCoord(type, id) {
-    // 根据类型返回 {x,y,z}
     if (type === 'static') {
-        // static 坐标存储在 selectedElement.staticCoord 中
         const sel = state.selectedElement;
-        if (sel && sel.type === 'static' && sel.staticCoord) {
-            return sel.staticCoord;
-        }
+        if (sel && sel.type === 'static' && sel.staticCoord) return sel.staticCoord;
         return null;
     }
     const arrays = {
@@ -911,7 +1266,6 @@ function getElementCoord(type, id) {
     if (!arr) return null;
     const elem = arr.find(e => e.id === id);
     if (!elem) return null;
-    // 提取坐标
     if (type === 'moving') {
         const p = getMovingPos(elem);
         return { x: p.x, y: p.y, z: p.z };
@@ -922,48 +1276,43 @@ function getElementCoord(type, id) {
             return { x: p.x, y: p.y, z: p.z + 1 };
         }
     }
-    // 其他类型直接有 x,y,z
     if (elem.x !== undefined && elem.y !== undefined && elem.z !== undefined) {
         return { x: elem.x, y: elem.y, z: elem.z };
     }
-    // 特殊处理 OtherCube/DarkCube 取触发点
     if (elem.triggerX !== undefined) {
         return { x: elem.triggerX, y: elem.triggerY, z: elem.triggerZ };
     }
     return null;
 }
 
-
 function deleteElement(type, id) {
-	let deleted = false;
-	let deletedId = id;
-	// 新增处理 seqbutton
+	// seqbutton：从所属序列删，整体当一条撤销
 	if (type === 'seqbutton') {
-		// 查找所属序列
 		for (let seq of state.buttonSequences) {
 			const idx = seq.buttons ? seq.buttons.findIndex(b => b.id === id) : -1;
 			if (idx !== -1) {
+				const before = _cloneDeep(seq);
+				const removedBtn = seq.buttons[idx];
 				seq.buttons.splice(idx, 1);
-				deleted = true;
-				break;
+				_removeFromIndex(removedBtn);
+				_recordSet('buttonSequence', seq, before);
+				if (state.selectedElement && state.selectedElement.type === 'seqbutton' && state.selectedElement.id === id) {
+					state.selectedElement = null;
+				}
+				renderGrid();
+				requestRender();
+				updatePanel();
+				updateElemList();
+				updateStatus();
+				uniInterface();
+				showToast(`已删除子按钮 #${id}`);
+				return;
 			}
-		}
-		if (deleted) {
-			if (state.selectedElement && state.selectedElement.type === 'seqbutton' && state.selectedElement.id === id) {
-				state.selectedElement = null;
-			}
-			renderGrid();
-			requestRender();
-			updatePanel();
-			updateElemList();
-			updateStatus();
-			uniInterface();
-			showToast(`已删除子按钮 #${id}`);
-			return;
 		}
 		showToast('未找到该子按钮');
 		return;
 	}
+
 	const arrays = {
 		moving: state.movingPlatforms,
 		falling: state.fallingPlatforms,
@@ -977,31 +1326,32 @@ function deleteElement(type, id) {
 		darkcube: state.darkCubes,
 		buttonsequence: state.buttonSequences
 	};
-	// 处理特殊类型（有子类型）
 	let targetArr = null;
 	if (type === 'othercube_trigger' || type === 'othercube_cube') targetArr = state.otherCubes;
 	else if (type === 'darkcube_trigger' || type === 'darkcube_cube') targetArr = state.darkCubes;
 	else targetArr = arrays[type];
+
+	let deleted = false;
     if (targetArr) {
         const idx = targetArr.findIndex(m => m.id === id);
         if (idx !== -1) {
             const elemToDelete = targetArr[idx];
 
+            // ★ 抓可能被 cleanReferences 波及的元素快照（before）
+            const refIds = [elemToDelete.xmlId, elemToDelete.id, id].filter(Boolean);
+            const effects = _snapshotDeleteEffects(refIds);
+
+            // ★ moving 解绑副作用
             if (type === 'moving') {
                 const mp = elemToDelete;
                 const pos = getMovingPos(mp);
-
                 state.buttons.forEach(btn => {
-                    // ★ 先判断 btn.movingPlatformID 非空
                     if (btn.movingPlatformID &&
                         (btn.movingPlatformID === mp.xmlId || btn.movingPlatformID === mp.id)) {
-                        btn.x = pos.x;
-                        btn.y = pos.y;
-                        btn.z = pos.z + 1;
+                        btn.x = pos.x; btn.y = pos.y; btn.z = pos.z + 1;
                         btn.movingPlatformID = '';
                     }
                 });
-
                 state.buttonSequences.forEach(seq => {
                     if (seq.buttons) {
                         seq.buttons.forEach(btn => {
@@ -1015,13 +1365,18 @@ function deleteElement(type, id) {
                 });
             }
 
-            // 清理其他引用（传入 xmlId 或内部 id，确保 affect 列表等也能正确清理）
+            // cleanReferences 副作用
             cleanReferences(elemToDelete.xmlId || elemToDelete.id || id);
 
-            targetArr.splice(idx, 1);
+            // ★ 现抓 after（清理后状态）
+            effects.forEach(e => { e.after = _cloneDeep(e.target); });
+
+            // ★ 记录（_recordRemove 里会 splice + 更新索引 + 刷新 effects 的索引）
+            _recordRemove(type, targetArr, elemToDelete, effects);
             deleted = true;
         }
     }
+
 	if (deleted) {
 		if (state.selectedElement && state.selectedElement.type === type && state.selectedElement.id === id) {
 			state.selectedElement = null;
@@ -1035,42 +1390,6 @@ function deleteElement(type, id) {
 	}
 }
 
-// 静态方块
-/*function toggleStaticBlock(x, y, z) {
-	if (x < 0 || x >= state.level.size.w || y < 0 || y >= state.level.size.l || z < 0 || z >= state.level.size.h) {
-		showToast('静态方块只能在关卡尺寸范围内放置');
-		return;
-	}
-    // ★ 修改这里：如果层不存在，且是增加方块，就创建它
-	let layer = state.staticBlocks[z];
-    if (!current && !layer) {
-        layer = getOrCreateLayer(z);
-    }
-	if (!layer) return;
-	const { w, l } = state.level.size;
-	if (x < 0 || x >= w || y < 0 || y >= l) return;
-	const current = layer[y][x];
-	if (current) {
-		layer[y][x] = null;
-		if (state.selectedElement && state.selectedElement.type === 'static' &&
-			state.selectedElement.staticCoord.x === x && state.selectedElement.staticCoord.y === y &&
-			state.selectedElement.staticCoord.z === z) {
-			state.selectedElement = null;
-		}
-	} else {
-		let color = state.staticColor;
-		if (!color) {
-			color = getStaticDefault(z);
-		}
-		layer[y][x] = { r: color.r, g: color.g, b: color.b };
-		selectStatic(x, y, z);
-	}
-	updatePixelAt(x, y, z);
-	updatePanel();
-	updateStatus();
-	uniInterface();
-}*/
-
 function toggleStaticBlock(x, y, z) {
     if (x < 0 || x >= state.level.size.w || y < 0 || y >= state.level.size.l || z < 0 || z >= state.level.size.h) {
         showToast('静态方块只能在关卡尺寸范围内放置');
@@ -1080,11 +1399,7 @@ function toggleStaticBlock(x, y, z) {
     if (x < 0 || x >= w || y < 0 || y >= l) return;
 
     let layer = state.staticBlocks[z];
-
-    // ★ 只有"这一格是空、要放方块"时才需要创建层；
-    //    删除操作不需要新建层（层不存在说明本来就空，直接 return）
     if (!layer) {
-        // 层不存在 = 整层空 = 这一格必然为空 → 走"放置"分支，按需建层
         layer = getOrCreateLayer(z);
         if (!layer) return;
     }
@@ -1092,8 +1407,11 @@ function toggleStaticBlock(x, y, z) {
     const current = layer[y] ? layer[y][x] : null;
 
     if (current) {
-        // 删除
+        const before = { ...current };
         layer[y][x] = null;
+        _recordStep({ kind: 'static', x, y, z, before, after: null });
+        _markDirty(`layer_${z}`);
+        _adjustStaticCount(z, -1);
         if (state.selectedElement && state.selectedElement.type === 'static' &&
             state.selectedElement.staticCoord.x === x &&
             state.selectedElement.staticCoord.y === y &&
@@ -1101,9 +1419,11 @@ function toggleStaticBlock(x, y, z) {
             state.selectedElement = null;
         }
     } else {
-        // 放置
         const color = state.staticColor || getStaticDefault(z);
         layer[y][x] = { r: color.r, g: color.g, b: color.b };
+        _recordStep({ kind: 'static', x, y, z, before: null, after: { r: color.r, g: color.g, b: color.b } });
+        _markDirty(`layer_${z}`);
+        _adjustStaticCount(z, 1);
         selectStatic(x, y, z);
     }
 
@@ -1113,7 +1433,6 @@ function toggleStaticBlock(x, y, z) {
     uniInterface();
 }
 
-// 在 selectStatic 中
 function selectStatic(x, y, z) {
 	const layer = state.staticBlocks[z];
 	if (!layer || !layer[y] || !layer[y][x]) {
@@ -1123,7 +1442,6 @@ function selectStatic(x, y, z) {
 		return;
 	}
 
-    // ★ 自动跳块/跳层
     if (state.settings.autoJumpChunk !== false) {
         const chunkSize = state.settings.chunkSize || 100;
         const targetCX = Math.floor(x / chunkSize);
@@ -1151,13 +1469,17 @@ function selectStatic(x, y, z) {
 function updateStaticRGB(x, y, z, r, g, b) {
 	const layer = state.staticBlocks[z];
 	if (!layer || !layer[y] || !layer[y][x]) return;
-	layer[y][x] = { r: clamp(r, 0, 255), g: clamp(g, 0, 255), b: clamp(b, 0, 255) };
-	// 同步更新画笔颜色
-	state.staticColor = { r: clamp(r, 0, 255), g: clamp(g, 0, 255), b: clamp(b, 0, 255) };
-	// 同步更新颜色选择器
+	const before = { ...layer[y][x] };
+	const after = { r: clamp(r, 0, 255), g: clamp(g, 0, 255), b: clamp(b, 0, 255) };
+	layer[y][x] = after;
+	_recordStep({ kind: 'static', x, y, z, before, after: { ...after } });
+	_markDirty(`layer_${z}`);
+
+	// 同步更新画笔颜色（UI 状态，不进撤销）
+	state.staticColor = { ...after };
 	const colorPicker = document.getElementById('staticColorPicker');
 	if (colorPicker) {
-		const hex = '#' + [clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255)].map(c => c.toString(16).padStart(2, '0')).join('');
+		const hex = '#' + [after.r, after.g, after.b].map(c => c.toString(16).padStart(2, '0')).join('');
 		colorPicker.value = hex;
 	}
 	requestRender();
@@ -1168,9 +1490,12 @@ function updateStaticRGB(x, y, z, r, g, b) {
 function resetStaticColor(x, y, z) {
 	const layer = state.staticBlocks[z];
 	if (!layer || !layer[y] || !layer[y][x]) return;
+	const before = { ...layer[y][x] };
 	const def = getStaticDefault(z);
 	layer[y][x] = { r: def.r, g: def.g, b: def.b };
-	// 同步更新画笔颜色和颜色选择器
+	_recordStep({ kind: 'static', x, y, z, before, after: { r: def.r, g: def.g, b: def.b } });
+	_markDirty(`layer_${z}`);
+
 	state.staticColor = { r: def.r, g: def.g, b: def.b };
 	const colorPicker = document.getElementById('staticColorPicker');
 	if (colorPicker) {
@@ -1183,7 +1508,6 @@ function resetStaticColor(x, y, z) {
 	showToast('已恢复默认颜色');
 }
 
-// 检查目标位置是否已有同类元素；添加模式直接放行
 function checkExist(arr, x, y, z, msg, getPos) {
     if (state.canvasEditMode === 'add') return false;
     const gp = getPos || (m => ({ x: m.x, y: m.y, z: m.z }));
@@ -1195,7 +1519,6 @@ function checkExist(arr, x, y, z, msg, getPos) {
     return false;
 }
 
-// 放置各类元素
 function placeMoving(x, y, z) {
     expandCanvasRangeForPoint(x, y, z);
     if (checkExist(state.movingPlatforms, x, y, z, '该位置已有移动平台', getMovingPos)) return;
@@ -1203,17 +1526,14 @@ function placeMoving(x, y, z) {
     const keep = state.keepPrevProps;
     const autoName = state.autoName;
 
-    // ★ 先决定路点：如果有上次可复用 → 直接生成完整 waypoints
     let waypoints = null;
     let baseProps = {};
     if (keep && state.movingPlatforms.length > 0) {
         const last = state.movingPlatforms[state.movingPlatforms.length - 1];
         const propsToKeep = ['autoStart', 'loopStartIndex', 'fullBlock'];
-        // ★ 只在统一运动开启时才继承 relatedTo / offset
         if (state.unifiedMovement.enabled) {
             propsToKeep.push('relatedTo', 'offset');
         }
-        // ★ Trace 相关属性一并继承
         propsToKeep.push('trace', 'traceMode', 'traceLength');
         propsToKeep.forEach(prop => {
             if (prop in last) baseProps[prop] = last[prop];
@@ -1225,12 +1545,11 @@ function placeMoving(x, y, z) {
                 y: y + (wp.y - base.y),
                 z: z + (wp.z - base.z),
                 travelTime: wp.travelTime || 0,
-                pauseTime: 0        // pauseTime 统一 0
+                pauseTime: 0
             }));
         }
     }
 
-    // ★ 没有可复用 → 默认结构
     if (!waypoints) {
         waypoints = [{ x, y, z, travelTime: 0, pauseTime: 0 }];
         if (x + 2 < state.level.size.w) {
@@ -1245,13 +1564,12 @@ function placeMoving(x, y, z) {
         autoStart: true,
         loopStartIndex: 0,
         fullBlock: true,
-        waypoints,            // ★ 一次性赋值完整数组
+        waypoints,
         relatedTo: '',
         offset: '',
         ...baseProps
     };
 
-    // 统一运动处理
     if (state.unifiedMovement.enabled && state.unifiedMovement.baseId) {
         const base = state.movingPlatforms.find(m => (m.xmlId || m.id) === state.unifiedMovement.baseId);
         if (base) {
@@ -1263,16 +1581,14 @@ function placeMoving(x, y, z) {
             newM.hideWaypoints = true;
         }
     }
-    
-    // ★ 统一运动关闭时，强制清空 relatedTo / offset
+
     if (!state.unifiedMovement.enabled) {
         newM.relatedTo = '';
         newM.offset = '';
     }
 
     state.movingPlatforms.push(newM);
-    // ★ 遍历所有路点扩展画布范围
-    //newM.waypoints.forEach(wp => expandCanvasRangeForPoint(wp.x, wp.y, wp.z));
+    _recordAdd('moving', state.movingPlatforms, newM);
     selectElement('moving', internalId);
     requestRender();
     updateElemList();
@@ -1284,22 +1600,21 @@ function placeMoving(x, y, z) {
 function placeFalling(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.fallingPlatforms, x, y, z, '该位置已有掉落平台')) return;
-		// ===== 新增：保留上次属性（复制所有非标识属性） =====
-		const keep = state.keepPrevProps;
-		let baseProps = {};
-		if (keep && state.fallingPlatforms.length > 0) {
-			const last = state.fallingPlatforms[state.fallingPlatforms.length - 1];
-			// 排除不需要继承的属性（标识符和坐标）
-			const exclude = ['id', 'xmlId', 'x', 'y', 'z'];
-			for (let key in last) {
-				if (last.hasOwnProperty(key) && !exclude.includes(key)) {
-					baseProps[key] = last[key];
-				}
+	const keep = state.keepPrevProps;
+	let baseProps = {};
+	if (keep && state.fallingPlatforms.length > 0) {
+		const last = state.fallingPlatforms[state.fallingPlatforms.length - 1];
+		const exclude = ['id', 'xmlId', 'x', 'y', 'z'];
+		for (let key in last) {
+			if (last.hasOwnProperty(key) && !exclude.includes(key)) {
+				baseProps[key] = last[key];
 			}
 		}
-		// ===== 新增结束 =====
+	}
 	const internalId = generateInternalId('F');
-	state.fallingPlatforms.push({ id: internalId, xmlId: '', x, y, z, floatTime: 20, ...baseProps });
+	const newElem = { id: internalId, xmlId: '', x, y, z, floatTime: 20, ...baseProps };
+	state.fallingPlatforms.push(newElem);
+	_recordAdd('falling', state.fallingPlatforms, newElem);
 	selectElement('falling', internalId);
 	requestRender();
 	updateElemList();
@@ -1311,20 +1626,17 @@ function placeFalling(x, y, z) {
 function placePrism(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.prisms, x, y, z, '该位置已有棱柱')) return;
-		// ===== 新增：保留上次属性 =====
-		const keep = state.keepPrevProps;
-		let baseProps = {};
-		if (keep && state.prisms.length > 0) {
-			const last = state.prisms[state.prisms.length - 1];
-			// 可保留的属性列表
-			const propsToKeep = ['energy'];
-			propsToKeep.forEach(prop => {
-				if (prop in last) baseProps[prop] = last[prop];
-			});
-		}
-		// ===== 新增结束 =====
+	const keep = state.keepPrevProps;
+	let baseProps = {};
+	if (keep && state.prisms.length > 0) {
+		const last = state.prisms[state.prisms.length - 1];
+		const propsToKeep = ['energy'];
+		propsToKeep.forEach(prop => { if (prop in last) baseProps[prop] = last[prop]; });
+	}
 	const internalId = generateInternalId('P');
-	state.prisms.push({ id: internalId, xmlId: '', x, y, z, energy: 1 , ...baseProps });
+	const newElem = { id: internalId, xmlId: '', x, y, z, energy: 1, ...baseProps };
+	state.prisms.push(newElem);
+	_recordAdd('prism', state.prisms, newElem);
 	selectElement('prism', internalId);
 	requestRender();
 	updateElemList();
@@ -1342,20 +1654,17 @@ function placeResizer(x, y, z, type) {
         const exist = state.resizers.some(m => m.x === x && m.y === y && m.z === z && m.type === type);
         if (exist) { showToast('该位置已有同类型尺寸调整器'); return; }
     }
-		// ===== 新增：保留上次属性 =====
-		const keep = state.keepPrevProps;
-		let baseProps = {};
-		if (keep && state.resizers.length > 0) {
-			const last = state.resizers[state.resizers.length - 1];
-			// 可保留的属性列表
-			const propsToKeep = ['visible', 'radiusX', 'radiusY'];
-			propsToKeep.forEach(prop => {
-				if (prop in last) baseProps[prop] = last[prop];
-			});
-		}
-		// ===== 新增结束 =====
+	const keep = state.keepPrevProps;
+	let baseProps = {};
+	if (keep && state.resizers.length > 0) {
+		const last = state.resizers[state.resizers.length - 1];
+		const propsToKeep = ['visible', 'radiusX', 'radiusY'];
+		propsToKeep.forEach(prop => { if (prop in last) baseProps[prop] = last[prop]; });
+	}
 	const internalId = generateInternalId('R');
-	state.resizers.push({ id: internalId, xmlId: '', x, y, z, type, visible: true, radiusX: 0, radiusY: 0 , ...baseProps });
+	const newElem = { id: internalId, xmlId: '', x, y, z, type, visible: true, radiusX: 0, radiusY: 0, ...baseProps };
+	state.resizers.push(newElem);
+	_recordAdd('resizer', state.resizers, newElem);
 	selectElement('resizer', internalId);
 	requestRender();
 	updateElemList();
@@ -1367,26 +1676,20 @@ function placeResizer(x, y, z, type) {
 function placeBumper(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.bumpers, x, y, z, '该位置已有撞击器')) return;
-    // ===== 新增：保留上次属性（含四个方向子元素） =====
-    const keep = state.keepPrevProps;              // ★ 读 state
+    const keep = state.keepPrevProps;
     let baseProps = {};
     if (keep && state.bumpers.length > 0) {
         const last = state.bumpers[state.bumpers.length - 1];
-        // 顶层属性
         const propsToKeep = ['enabled'];
-        propsToKeep.forEach(prop => {
-            if (prop in last) baseProps[prop] = last[prop];
-        });
-        // ★ 四个方向子元素（深拷贝，避免后续修改互相污染）
+        propsToKeep.forEach(prop => { if (prop in last) baseProps[prop] = last[prop]; });
         ['north', 'east', 'south', 'west'].forEach(dir => {
             if (last[dir]) baseProps[dir] = { ...last[dir] };
         });
     }
-    // ===== 新增结束 =====
 	const internalId = generateInternalId('B');
 	const autoName = state.autoName;
 	const defaultDir = { startDelay: 0, pulseRate: 0 };
-	state.bumpers.push({
+	const newElem = {
 		id: internalId,
 		xmlId: autoName ? generateUniqueXmlId(internalId) : '',
 		x, y, z,
@@ -1396,7 +1699,9 @@ function placeBumper(x, y, z) {
 		south: { ...defaultDir, enabled: false },
 		west: { ...defaultDir, enabled: false },
 		...baseProps
-	});
+	};
+	state.bumpers.push(newElem);
+	_recordAdd('bumper', state.bumpers, newElem);
 	selectElement('bumper', internalId);
 	requestRender();
 	updateElemList();
@@ -1408,20 +1713,17 @@ function placeBumper(x, y, z) {
 function placeCheckpoint(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.checkpoints, x, y, z, '该位置已有存档点')) return;
-		// ===== 新增：保留上次属性 =====
-		const keep = state.keepPrevProps;
-		let baseProps = {};
-		if (keep && state.checkpoints.length > 0) {
-			const last = state.checkpoints[state.checkpoints.length - 1];
-			// 可保留的属性列表
-			const propsToKeep = ['respawnZ', 'radiusX', 'radiusY'];
-			propsToKeep.forEach(prop => {
-				if (prop in last) baseProps[prop] = last[prop];
-			});
-		}
-		// ===== 新增结束 =====
+	const keep = state.keepPrevProps;
+	let baseProps = {};
+	if (keep && state.checkpoints.length > 0) {
+		const last = state.checkpoints[state.checkpoints.length - 1];
+		const propsToKeep = ['respawnZ', 'radiusX', 'radiusY'];
+		propsToKeep.forEach(prop => { if (prop in last) baseProps[prop] = last[prop]; });
+	}
 	const internalId = generateInternalId('CP');
-	state.checkpoints.push({ id: internalId, xmlId: '', x, y, z, respawnZ: z, radiusX: 0, radiusY: 0, ...baseProps });
+	const newElem = { id: internalId, xmlId: '', x, y, z, respawnZ: z, radiusX: 0, radiusY: 0, ...baseProps };
+	state.checkpoints.push(newElem);
+	_recordAdd('checkpoint', state.checkpoints, newElem);
 	selectElement('checkpoint', internalId);
 	requestRender();
 	updateElemList();
@@ -1433,34 +1735,22 @@ function placeCheckpoint(x, y, z) {
 function placeCameraTrigger(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.cameraTriggers, x, y, z, '该位置已有相机触发')) return;
-		// ===== 新增：保留上次属性 =====
-		const keep = state.keepPrevProps;
-		let baseProps = {};
-		if (keep && state.cameraTriggers.length > 0) {
-			const last = state.cameraTriggers[state.cameraTriggers.length - 1];
-			// 可保留的属性列表
-			const propsToKeep = ['radiusX', 'radiusY', 'zoom', 'angle', 'fov', 'startDelay', 'duration', 'singleUse', 'useAngle'];
-			propsToKeep.forEach(prop => {
-				if (prop in last) baseProps[prop] = last[prop];
-			});
-		}
-		// ===== 新增结束 =====
+	const keep = state.keepPrevProps;
+	let baseProps = {};
+	if (keep && state.cameraTriggers.length > 0) {
+		const last = state.cameraTriggers[state.cameraTriggers.length - 1];
+		const propsToKeep = ['radiusX', 'radiusY', 'zoom', 'angle', 'fov', 'startDelay', 'duration', 'singleUse', 'useAngle'];
+		propsToKeep.forEach(prop => { if (prop in last) baseProps[prop] = last[prop]; });
+	}
 	const internalId = generateInternalId('CT');
-	state.cameraTriggers.push({
-		id: internalId,
-		xmlId: '',
-		x, y, z,
-		radiusX: 0,
-		radiusY: 0,
-		zoom: -1,
-		angle: 22,
-		fov: 22,
-		startDelay: 0,
-		duration: 0,
-		singleUse: false,
-		useAngle: true,
+	const newElem = {
+		id: internalId, xmlId: '', x, y, z,
+		radiusX: 0, radiusY: 0, zoom: -1, angle: 22, fov: 22,
+		startDelay: 0, duration: 0, singleUse: false, useAngle: true,
 		...baseProps
-	});
+	};
+	state.cameraTriggers.push(newElem);
+	_recordAdd('cameratrigger', state.cameraTriggers, newElem);
 	selectElement('cameratrigger', internalId);
 	requestRender();
 	updateElemList();
@@ -1472,21 +1762,16 @@ function placeCameraTrigger(x, y, z) {
 function placeButton(x, y, z) {
 	expandCanvasRangeForPoint(x, y, z);
 	if (checkExist(state.buttons, x, y, z, '该位置已有按钮')) return;
-		// ===== 新增：保留上次属性 =====
-		const keep = state.keepPrevProps;
-		let baseProps = {};
-		if (keep && state.buttons.length > 0) {
-			const last = state.buttons[state.buttons.length - 1];
-			// 可保留的属性列表
-			const propsToKeep = ['visible', 'disableCount', 'mode'];
-			propsToKeep.forEach(prop => {
-				if (prop in last) baseProps[prop] = last[prop];
-			});
-		}
-		// ===== 新增结束 =====
+	const keep = state.keepPrevProps;
+	let baseProps = {};
+	if (keep && state.buttons.length > 0) {
+		const last = state.buttons[state.buttons.length - 1];
+		const propsToKeep = ['visible', 'disableCount', 'mode'];
+		propsToKeep.forEach(prop => { if (prop in last) baseProps[prop] = last[prop]; });
+	}
 	const internalId = generateInternalId('Btn');
 	const autoName = state.autoName;
-	state.buttons.push({
+	const newElem = {
 		id: internalId,
 		xmlId: autoName ? generateUniqueXmlId(internalId) : '',
 		x, y, z,
@@ -1499,7 +1784,9 @@ function placeButton(x, y, z) {
 		triggerAchievements: '',
 		affectButtons: '',
 		...baseProps
-	});
+	};
+	state.buttons.push(newElem);
+	_recordAdd('button', state.buttons, newElem);
 	selectElement('button', internalId);
 	requestRender();
 	updateElemList();
@@ -1509,43 +1796,29 @@ function placeButton(x, y, z) {
 }
 
 function placeOtherCube(x, y, z) {
-	expandCanvasRangeForPoint(x + 1, y, z); // 默认 cube 位置
+	expandCanvasRangeForPoint(x + 1, y, z);
 	if (checkExist(state.otherCubes, x, y, z, '该位置已有提示方块触发点',
         m => ({ x: m.triggerX, y: m.triggerY, z: m.triggerZ }))) return;
-		// ===== 新增：保留上次属性 =====
-		const keep = state.keepPrevProps;
-		let baseProps = {};
-		if (keep && state.otherCubes.length > 0) {
-			const last = state.otherCubes[state.otherCubes.length - 1];
-			// 可保留的属性列表
-			const propsToKeep = ['radiusX', 'radiusY', 'mode', 'moveDirX', 'moveDirY', 'moveDirZ'];
-			propsToKeep.forEach(prop => {
-				if (prop in last) baseProps[prop] = last[prop];
-			});
-		}
-		// ===== 新增结束 =====
+	const keep = state.keepPrevProps;
+	let baseProps = {};
+	if (keep && state.otherCubes.length > 0) {
+		const last = state.otherCubes[state.otherCubes.length - 1];
+		const propsToKeep = ['radiusX', 'radiusY', 'mode', 'moveDirX', 'moveDirY', 'moveDirZ'];
+		propsToKeep.forEach(prop => { if (prop in last) baseProps[prop] = last[prop]; });
+	}
 	const internalId = generateInternalId('OC');
-	state.otherCubes.push({
-		id: internalId,
-		xmlId: '',
-		triggerX: x,
-		triggerY: y,
-		triggerZ: z,
-		cubeX: x + 1,
-		cubeY: y,
-		cubeZ: z,
-		radiusX: 0,
-		radiusY: 0,
-		mode: 'AutoHide',
-		moveDirX: 0,
-		moveDirY: -1,
-		moveDirZ: 0,
+	const newElem = {
+		id: internalId, xmlId: '',
+		triggerX: x, triggerY: y, triggerZ: z,
+		cubeX: x + 1, cubeY: y, cubeZ: z,
+		radiusX: 0, radiusY: 0, mode: 'AutoHide',
+		moveDirX: 0, moveDirY: -1, moveDirZ: 0,
 		movingBlockSync: '',
-		subMovingPlatforms: [],
-		subButtons: [],
-		keyEvents: [],
+		subMovingPlatforms: [], subButtons: [], keyEvents: [],
 		...baseProps
-	});
+	};
+	state.otherCubes.push(newElem);
+	_recordAdd('othercube', state.otherCubes, newElem);
 	selectElement('othercube', internalId);
 	requestRender();
 	updateElemList();
@@ -1555,37 +1828,27 @@ function placeOtherCube(x, y, z) {
 }
 
 function placeDarkCube(x, y, z) {
-	expandCanvasRangeForPoint(x + 1, y, z); // 默认 cube 位置
+	expandCanvasRangeForPoint(x + 1, y, z);
 	if (checkExist(state.darkCubes, x, y, z, '该位置已有黑暗方块触发点',
         m => ({ x: m.triggerX, y: m.triggerY, z: m.triggerZ }))) return;
-		// ===== 新增：保留上次属性 =====
-		const keep = state.keepPrevProps;
-		let baseProps = {};
-		if (keep && state.darkCubes.length > 0) {
-			const last = state.darkCubes[state.darkCubes.length - 1];
-			// 可保留的属性列表
-			const propsToKeep = ['radiusX', 'radiusY'];
-			propsToKeep.forEach(prop => {
-				if (prop in last) baseProps[prop] = last[prop];
-			});
-		}
-		// ===== 新增结束 =====
+	const keep = state.keepPrevProps;
+	let baseProps = {};
+	if (keep && state.darkCubes.length > 0) {
+		const last = state.darkCubes[state.darkCubes.length - 1];
+		const propsToKeep = ['radiusX', 'radiusY'];
+		propsToKeep.forEach(prop => { if (prop in last) baseProps[prop] = last[prop]; });
+	}
 	const internalId = generateInternalId('DC');
-	state.darkCubes.push({
-		id: internalId,
-		xmlId: '',
-		triggerX: x,
-		triggerY: y,
-		triggerZ: z,
-		cubeX: x + 1,
-		cubeY: y,
-		cubeZ: z,
-		radiusX: 0,
-		radiusY: 0,
-		movingBlockSync: '',
-		keyEvents: [],
+	const newElem = {
+		id: internalId, xmlId: '',
+		triggerX: x, triggerY: y, triggerZ: z,
+		cubeX: x + 1, cubeY: y, cubeZ: z,
+		radiusX: 0, radiusY: 0,
+		movingBlockSync: '', keyEvents: [],
 		...baseProps
-	});
+	};
+	state.darkCubes.push(newElem);
+	_recordAdd('darkcube', state.darkCubes, newElem);
 	selectElement('darkcube', internalId);
 	requestRender();
 	updateElemList();
@@ -1596,7 +1859,7 @@ function placeDarkCube(x, y, z) {
 
 function addButtonSequence() {
 	const internalId = generateInternalId('BS');
-	state.buttonSequences.push({
+	const newSeq = {
 		id: internalId,
 		xmlId: '',
 		sequenceInOrder: false,
@@ -1605,7 +1868,9 @@ function addButtonSequence() {
 		triggerAchievements: '',
 		affectButtons: '',
 		buttons: []
-	});
+	};
+	state.buttonSequences.push(newSeq);
+	_recordAdd('buttonSequence', state.buttonSequences, newSeq);
 	selectElement('buttonsequence', internalId);
 	updateElemList();
 	updatePanel();
@@ -1613,12 +1878,11 @@ function addButtonSequence() {
 	showToast(`按钮序列 #${internalId} 已创建`);
 }
 
-
-
-// ===== ButtonSequence 子按钮辅助函数 =====
+// ===== ButtonSequence 子按钮 =====
 window.addButtonSequenceButton = function(parentId) {
 	const parent = state.buttonSequences.find(b => b.id === parentId);
 	if (!parent) return;
+	const before = _cloneDeep(parent);
 	if (!parent.buttons) parent.buttons = [];
 	const internalId = generateInternalId('SB');
 	const autoName = state.autoName;
@@ -1629,6 +1893,7 @@ window.addButtonSequenceButton = function(parentId) {
 		position: { x: 0, y: 0, z: 0 },
 		movingPlatformID: ''
 	});
+	_recordSet('buttonSequence', parent, before);
 	updatePanel();
 	uniInterface();
 	showToast('已添加子按钮');
@@ -1637,7 +1902,11 @@ window.addButtonSequenceButton = function(parentId) {
 window.removeButtonSequenceButton = function(parentId, idx) {
 	const parent = state.buttonSequences.find(b => b.id === parentId);
 	if (!parent || !parent.buttons || idx >= parent.buttons.length) return;
+	const before = _cloneDeep(parent);
+	const removedBtn = parent.buttons[idx];
 	parent.buttons.splice(idx, 1);
+	_removeFromIndex(removedBtn);
+	_recordSet('buttonSequence', parent, before);
 	renderGrid();
 	updatePanel();
 	updateElemList();
@@ -1650,10 +1919,11 @@ window.moveButtonSequenceButton = function(parentId, idx, delta) {
 	if (!parent || !parent.buttons || idx < 0 || idx >= parent.buttons.length) return;
 	const newIdx = idx + delta;
 	if (newIdx < 0 || newIdx >= parent.buttons.length) return;
-	// 交换位置
+	const before = _cloneDeep(parent);
 	const tmp = parent.buttons[idx];
 	parent.buttons[idx] = parent.buttons[newIdx];
 	parent.buttons[newIdx] = tmp;
+	_recordSet('buttonSequence', parent, before);
 	updatePanel();
 	uniInterface();
 	showToast('已调整顺序');
@@ -1662,15 +1932,14 @@ window.moveButtonSequenceButton = function(parentId, idx, delta) {
 window.updateButtonSequenceButtonProp = function(parentId, idx, key, val) {
 	const parent = state.buttonSequences.find(b => b.id === parentId);
 	if (!parent || !parent.buttons || idx >= parent.buttons.length) return;
+	const before = _cloneDeep(parent);
 	const btn = parent.buttons[idx];
 	if (key === 'visible') {
 		btn.visible = val;
 	} else if (key === 'id') {
 		let newId = String(val).trim();
 		if (!newId) { showToast('编号不能为空'); return; }
-		// 放宽验证：允许汉字、字母、数字、下划线、连字符，不允许空格、逗号、尖括号、引号
 		if (!/^[^\s,<>"']+$/.test(newId)) { showToast('编号包含非法字符'); return; }
-		// 检查全局唯一性
 		const allIds = [];
 		state.movingPlatforms.forEach(m => allIds.push(m.id));
 		state.fallingPlatforms.forEach(m => allIds.push(m.id));
@@ -1683,20 +1952,17 @@ window.updateButtonSequenceButtonProp = function(parentId, idx, key, val) {
 		state.buttonSequences.forEach(m => allIds.push(m.id));
 		state.otherCubes.forEach(m => allIds.push(m.id));
 		state.darkCubes.forEach(m => allIds.push(m.id));
-		// 排除自己
 		const conflict = allIds.some(id => id === newId && id !== btn.id);
 		if (conflict) { showToast('ID已存在'); return; }
-		// 更新按钮的id
 		const oldId = btn.id;
 		btn.id = newId;
-		// 如果当前选中的元素就是这个子按钮，更新选中状态
 		if (state.selectedElement && state.selectedElement.type === 'seqbutton' && state.selectedElement.id === oldId) {
 			state.selectedElement.id = newId;
 		}
-		// 注意：其他元素可能引用此ID？对于子按钮，一般不被引用，可以忽略。
 	} else {
 		setField(btn, key, val);
 	}
+	_recordSet('buttonSequence', parent, before);
 	uniInterface();
 	updatePanel();
 };
@@ -1704,10 +1970,12 @@ window.updateButtonSequenceButtonProp = function(parentId, idx, key, val) {
 window.updateButtonSequenceButtonPos = function(parentId, idx, axis, val) {
 	const parent = state.buttonSequences.find(b => b.id === parentId);
 	if (!parent || !parent.buttons || idx >= parent.buttons.length) return;
+	const before = _cloneDeep(parent);
 	const btn = parent.buttons[idx];
 	if (!btn.position) btn.position = { x: 0, y: 0, z: 0 };
 	btn.position[axis] = val;
 	btn.movingPlatformID = '';
+	_recordSet('buttonSequence', parent, before);
 	expandCanvasRangeForPoint(btn.position.x, btn.position.y, btn.position.z);
 	uniInterface();
 	updatePanel();
@@ -1717,10 +1985,10 @@ window.updateButtonSequenceButtonPos = function(parentId, idx, axis, val) {
 window.updateButtonSequenceButtonMovingPlatform = function(parentId, idx, val) {
 	const parent = state.buttonSequences.find(b => b.id === parentId);
 	if (!parent || !parent.buttons || idx >= parent.buttons.length) return;
+	const before = _cloneDeep(parent);
 	const btn = parent.buttons[idx];
 
 	if (val) {
-		// 绑定：不动 position
 		btn.movingPlatformID = val;
 		const mp = state.movingPlatforms.find(m => m.id === val || m.xmlId === val);
 		if (mp) {
@@ -1728,7 +1996,6 @@ window.updateButtonSequenceButtonMovingPlatform = function(parentId, idx, val) {
 			expandCanvasRangeForPoint(pos.x, pos.y, pos.z);
 		}
 	} else {
-		// 解绑：把移动平台当前位置快照为子按钮 position
 		if (btn.movingPlatformID) {
 			const mp = state.movingPlatforms.find(m =>
 				m.id === btn.movingPlatformID || m.xmlId === btn.movingPlatformID
@@ -1746,109 +2013,96 @@ window.updateButtonSequenceButtonMovingPlatform = function(parentId, idx, val) {
 		btn.movingPlatformID = '';
 	}
 
+	_recordSet('buttonSequence', parent, before);
 	uniInterface();
 	updatePanel();
 	requestRender();
 };
 
-// ---- 坐标更新函数 ----
+// ---- 坐标更新 ----
 window.updateFallingPos = function(id, axis, val) {
 	const elem = state.fallingPlatforms.find(p => p.id === id);
 	if (!elem) return;
-	if (axis === 'x') elem.x = val;
-	else if (axis === 'y') elem.y = val;
-	else if (axis === 'z') elem.z = val;
+	const before = _cloneDeep(elem);
+	if (axis === 'x') elem.x = val; else if (axis === 'y') elem.y = val; else if (axis === 'z') elem.z = val;
+	_recordSet('falling', elem, before);
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
-	requestRender();
-	updatePanel();
-	uniInterface();
+	requestRender(); updatePanel(); uniInterface();
 };
 
 window.updatePrismPos = function(id, axis, val) {
 	const elem = state.prisms.find(p => p.id === id);
 	if (!elem) return;
-	if (axis === 'x') elem.x = val;
-	else if (axis === 'y') elem.y = val;
-	else if (axis === 'z') elem.z = val;
+	const before = _cloneDeep(elem);
+	if (axis === 'x') elem.x = val; else if (axis === 'y') elem.y = val; else if (axis === 'z') elem.z = val;
+	_recordSet('prism', elem, before);
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
-	requestRender();
-	updatePanel();
-	uniInterface();
+	requestRender(); updatePanel(); uniInterface();
 };
 
 window.updateResizerPos = function(id, axis, val) {
 	const elem = state.resizers.find(p => p.id === id);
 	if (!elem) return;
+	const before = _cloneDeep(elem);
 	if (axis === 'x') elem.x = clamp(val, 0, state.level.size.w - 1);
 	else if (axis === 'y') elem.y = clamp(val, 0, state.level.size.l - 1);
 	else if (axis === 'z') elem.z = clamp(val, 0, state.level.size.h);
+	_recordSet('resizer', elem, before);
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
-	requestRender();
-	updatePanel();
-	uniInterface();
+	requestRender(); updatePanel(); uniInterface();
 };
 
 window.updateBumperPos = function(id, axis, val) {
 	const elem = state.bumpers.find(p => p.id === id);
 	if (!elem) return;
-	if (axis === 'x') elem.x = val;
-	else if (axis === 'y') elem.y = val;
-	else if (axis === 'z') elem.z = val;
+	const before = _cloneDeep(elem);
+	if (axis === 'x') elem.x = val; else if (axis === 'y') elem.y = val; else if (axis === 'z') elem.z = val;
+	_recordSet('bumper', elem, before);
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
-	requestRender();
-	updatePanel();
-	uniInterface();
+	requestRender(); updatePanel(); uniInterface();
 };
 
 window.updateCheckpointPos = function(id, axis, val) {
 	const elem = state.checkpoints.find(p => p.id === id);
 	if (!elem) return;
-	if (axis === 'x') elem.x = val;
-	else if (axis === 'y') elem.y = val;
-	else if (axis === 'z') elem.z = val;
+	const before = _cloneDeep(elem);
+	if (axis === 'x') elem.x = val; else if (axis === 'y') elem.y = val; else if (axis === 'z') elem.z = val;
+	_recordSet('checkpoint', elem, before);
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
-	requestRender();
-	updatePanel();
-	uniInterface();
+	requestRender(); updatePanel(); uniInterface();
 };
 
 window.updateCameraTriggerPos = function(id, axis, val) {
 	const elem = state.cameraTriggers.find(p => p.id === id);
 	if (!elem) return;
-	if (axis === 'x') elem.x = val;
-	else if (axis === 'y') elem.y = val;
-	else if (axis === 'z') elem.z = val;
+	const before = _cloneDeep(elem);
+	if (axis === 'x') elem.x = val; else if (axis === 'y') elem.y = val; else if (axis === 'z') elem.z = val;
+	_recordSet('cameratrigger', elem, before);
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
-	requestRender();
-	updatePanel();
-	uniInterface();
+	requestRender(); updatePanel(); uniInterface();
 };
 
 window.updateButtonPos = function(id, axis, val) {
 	const elem = state.buttons.find(p => p.id === id);
 	if (!elem) return;
-	if (axis === 'x') elem.x = val;
-	else if (axis === 'y') elem.y = val;
-	else if (axis === 'z') elem.z = val;
-	// 如果修改了位置，清除 MovingPlatformID
+	const before = _cloneDeep(elem);
+	if (axis === 'x') elem.x = val; else if (axis === 'y') elem.y = val; else if (axis === 'z') elem.z = val;
 	elem.movingPlatformID = '';
+	_recordSet('button', elem, before);
 	expandCanvasRangeForPoint(elem.x, elem.y, elem.z);
-	requestRender();
-	updatePanel();
-	uniInterface();
+	requestRender(); updatePanel(); uniInterface();
 };
 
-// ===== OtherCube 子元素辅助函数 =====
+// ===== OtherCube 子元素辅助 =====
 window.addOtherCubeSubMP = function(parentId) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent) return;
+	const before = _cloneDeep(parent);
 	if (!parent.subMovingPlatforms) parent.subMovingPlatforms = [];
 	parent.subMovingPlatforms.push({
-		autoStart: false,
-		loopStartIndex: 0,
-		fullBlock: true,
-		// waypoints 将由父元素自动生成，我们不需要存储，仅保存基本属性
+		autoStart: false, loopStartIndex: 0, fullBlock: true
 	});
+	_recordSet('othercube', parent, before);
 	updatePanel();
 	uniInterface();
 	showToast('已添加子 MovingPlatform');
@@ -1856,7 +2110,9 @@ window.addOtherCubeSubMP = function(parentId) {
 window.removeOtherCubeSubMP = function(parentId, idx) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent || !parent.subMovingPlatforms) return;
+	const before = _cloneDeep(parent);
 	parent.subMovingPlatforms.splice(idx, 1);
+	_recordSet('othercube', parent, before);
 	updatePanel();
 	uniInterface();
 	showToast('已删除子 MovingPlatform');
@@ -1864,23 +2120,22 @@ window.removeOtherCubeSubMP = function(parentId, idx) {
 window.updateOtherCubeSubMPProp = function(parentId, idx, key, val) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent || !parent.subMovingPlatforms || idx >= parent.subMovingPlatforms.length) return;
+	const before = _cloneDeep(parent);
 	setField(parent.subMovingPlatforms[idx], key, val);
+	_recordSet('othercube', parent, before);
 	uniInterface();
 };
 
 window.addOtherCubeSubButton = function(parentId) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent) return;
+	const before = _cloneDeep(parent);
 	if (!parent.subButtons) parent.subButtons = [];
 	parent.subButtons.push({
-		visible: false,
-		disableCount: 0,
-		mode: 'StayDown',
-		affectMoving: '',
-		affectBumpers: '',
-		triggerAchievements: '',
-		affectButtons: ''
+		visible: false, disableCount: 0, mode: 'StayDown',
+		affectMoving: '', affectBumpers: '', triggerAchievements: '', affectButtons: ''
 	});
+	_recordSet('othercube', parent, before);
 	updatePanel();
 	uniInterface();
 	showToast('已添加子 Button');
@@ -1888,7 +2143,9 @@ window.addOtherCubeSubButton = function(parentId) {
 window.removeOtherCubeSubButton = function(parentId, idx) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent || !parent.subButtons) return;
+	const before = _cloneDeep(parent);
 	parent.subButtons.splice(idx, 1);
+	_recordSet('othercube', parent, before);
 	updatePanel();
 	uniInterface();
 	showToast('已删除子 Button');
@@ -1896,12 +2153,15 @@ window.removeOtherCubeSubButton = function(parentId, idx) {
 window.updateOtherCubeSubButtonProp = function(parentId, idx, key, val) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent || !parent.subButtons || idx >= parent.subButtons.length) return;
+	const before = _cloneDeep(parent);
 	setField(parent.subButtons[idx], key, val);
+	_recordSet('othercube', parent, before);
 	uniInterface();
 };
 window.updateOtherCubeSubButtonChecklist = function(parentId, idx, field, checkId, checked) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent || !parent.subButtons || idx >= parent.subButtons.length) return;
+	const before = _cloneDeep(parent);
 	const btn = parent.subButtons[idx];
 	let list = (btn[field] || '').split(',').filter(s => s.trim() !== '');
 	if (checked) {
@@ -1910,6 +2170,7 @@ window.updateOtherCubeSubButtonChecklist = function(parentId, idx, field, checkI
 		list = list.filter(s => s !== checkId);
 	}
 	btn[field] = list.join(',');
+	_recordSet('othercube', parent, before);
 	uniInterface();
 };
 
@@ -1923,7 +2184,9 @@ window.clearKeyEvents = function(id, type) {
         return;
     }
     if (!confirm('确定要清空所有按键事件吗？')) return;
+    const before = _cloneDeep(target);
     target.keyEvents = [];
+    _recordSet(type, target, before);
     uniInterface();
     updatePanel();
     showToast('已清空按键事件');
@@ -1932,8 +2195,10 @@ window.clearKeyEvents = function(id, type) {
 window.addOtherCubeKeyEvent = function(parentId) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent) return;
+	const before = _cloneDeep(parent);
 	if (!parent.keyEvents) parent.keyEvents = [];
 	parent.keyEvents.push({ dir: 'West', type: 'Down', timeOffset: 0 });
+	_recordSet('othercube', parent, before);
 	updatePanel();
 	uniInterface();
 	showToast('已添加按键事件');
@@ -1941,7 +2206,9 @@ window.addOtherCubeKeyEvent = function(parentId) {
 window.removeOtherCubeKeyEvent = function(parentId, idx) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent || !parent.keyEvents) return;
+	const before = _cloneDeep(parent);
 	parent.keyEvents.splice(idx, 1);
+	_recordSet('othercube', parent, before);
 	updatePanel();
 	uniInterface();
 	showToast('已删除按键事件');
@@ -1949,16 +2216,20 @@ window.removeOtherCubeKeyEvent = function(parentId, idx) {
 window.updateOtherCubeKeyEventProp = function(parentId, idx, key, val) {
 	const parent = state.otherCubes.find(o => o.id === parentId);
 	if (!parent || !parent.keyEvents || idx >= parent.keyEvents.length) return;
+	const before = _cloneDeep(parent);
 	setField(parent.keyEvents[idx], key, val);
+	_recordSet('othercube', parent, before);
 	uniInterface();
 };
 
-// ===== DarkCube 子元素辅助函数 =====
+// ===== DarkCube 子元素辅助 =====
 window.addDarkCubeKeyEvent = function(parentId) {
 	const parent = state.darkCubes.find(o => o.id === parentId);
 	if (!parent) return;
+	const before = _cloneDeep(parent);
 	if (!parent.keyEvents) parent.keyEvents = [];
 	parent.keyEvents.push({ dir: 'West', type: 'Down', timeOffset: 0 });
+	_recordSet('darkcube', parent, before);
 	updatePanel();
 	uniInterface();
 	showToast('已添加按键事件');
@@ -1966,7 +2237,9 @@ window.addDarkCubeKeyEvent = function(parentId) {
 window.removeDarkCubeKeyEvent = function(parentId, idx) {
 	const parent = state.darkCubes.find(o => o.id === parentId);
 	if (!parent || !parent.keyEvents) return;
+	const before = _cloneDeep(parent);
 	parent.keyEvents.splice(idx, 1);
+	_recordSet('darkcube', parent, before);
 	updatePanel();
 	uniInterface();
 	showToast('已删除按键事件');
@@ -1974,19 +2247,19 @@ window.removeDarkCubeKeyEvent = function(parentId, idx) {
 window.updateDarkCubeKeyEventProp = function(parentId, idx, key, val) {
 	const parent = state.darkCubes.find(o => o.id === parentId);
 	if (!parent || !parent.keyEvents || idx >= parent.keyEvents.length) return;
+	const before = _cloneDeep(parent);
 	setField(parent.keyEvents[idx], key, val);
+	_recordSet('darkcube', parent, before);
 	uniInterface();
 };
-
-
 
 // 更新函数
 window.updateMovingProp = function(id, key, val) {
 	const m = state.movingPlatforms.find(p => p.id === id);
 	if (!m) return;
+	const before = _cloneDeep(m);
 	if (key === 'relatedTo') {
 		setField(m, 'relatedTo', val);
-		updatePanel();
 	} else if (key === 'offset') {
 		setField(m, 'offset', val);
 	} else {
@@ -1994,8 +2267,9 @@ window.updateMovingProp = function(id, key, val) {
 	}
 	if (key === 'loopStartIndex') {
 		const maxWp = m.waypoints ? m.waypoints.length : 1;
-		if (val > maxWp) val = maxWp;
+		if (val > maxWp) m.loopStartIndex = maxWp;
 	}
+	_recordSet('moving', m, before);
 	requestRender();
 	updatePanel();
 	updateElemList();
@@ -2005,9 +2279,11 @@ window.updateMovingProp = function(id, key, val) {
 window.updateMovingPos = function(id, axis, val) {
 	const m = state.movingPlatforms.find(p => p.id === id);
 	if (!m) return;
+	const before = _cloneDeep(m);
 	const pos = getMovingPos(m);
 	pos[axis] = val;
 	setMovingPos(m, pos.x, pos.y, pos.z);
+	_recordSet('moving', m, before);
 	expandCanvasRangeForPoint(pos.x, pos.y, pos.z);
 	requestRender();
 	updatePanel();
@@ -2017,12 +2293,13 @@ window.updateMovingPos = function(id, axis, val) {
 window.updateWaypoint = function(id, idx, key, val) {
 	const m = state.movingPlatforms.find(p => p.id === id);
 	if (!m || !m.waypoints || idx >= m.waypoints.length) return;
+	const before = _cloneDeep(m);
 	if (key === 'x' || key === 'y' || key === 'z') {
 		m.waypoints[idx][key] = val;
 	} else {
 		m.waypoints[idx][key] = Math.max(0, val);
 	}
-	// 获取修改后的路点坐标，扩展画布范围
+	_recordSet('moving', m, before);
 	const wp = m.waypoints[idx];
 	expandCanvasRangeForPoint(wp.x, wp.y, wp.z);
 	updatePanel();
@@ -2034,6 +2311,7 @@ window.addWaypoint = function(id) {
     const m = state.movingPlatforms.find(p => p.id === id);
     if (!m) return;
     if (!m.waypoints) m.waypoints = [];
+    const before = _cloneDeep(m);
     const keep = state.keepPrevProps;
     const last = m.waypoints[m.waypoints.length - 1] || { x: 0, y: 0, z: 0, travelTime: 30 };
     const newWp = {
@@ -2043,6 +2321,7 @@ window.addWaypoint = function(id) {
         pauseTime: keep ? (last.pauseTime ?? 0) : 0,
     };
     m.waypoints.push(newWp);
+    _recordSet('moving', m, before);
     expandCanvasRangeForPoint(newWp.x, newWp.y, newWp.z);
     updatePanel();
     requestRender();
@@ -2054,106 +2333,105 @@ window.removeWaypoint = function(id, idx) {
 	if (idx === 0) { showToast('起点不能删除'); return; }
 	const m = state.movingPlatforms.find(p => p.id === id);
 	if (!m || !m.waypoints) return;
+	const before = _cloneDeep(m);
 	m.waypoints.splice(idx, 1);
+	_recordSet('moving', m, before);
 	updatePanel();
 	requestRender();
 	uniInterface();
 	showToast('已删除路点');
 };
 
-// 其他更新函数
 window.updateFallingProp = function(id, key, val) {
 	const m = state.fallingPlatforms.find(p => p.id === id);
 	if (m) {
+		const before = _cloneDeep(m);
 		setField(m, key, val);
-		uniInterface();
-		requestRender();
-		updatePanel();
+		_recordSet('falling', m, before);
+		uniInterface(); requestRender(); updatePanel();
 	}
 };
 window.updatePrismProp = function(id, key, val) {
 	const m = state.prisms.find(p => p.id === id);
 	if (m) {
+		const before = _cloneDeep(m);
 		setField(m, key, val);
-		uniInterface();
-		requestRender();
-		updatePanel();
+		_recordSet('prism', m, before);
+		uniInterface(); requestRender(); updatePanel();
 	}
 };
 window.updateResizerProp = function(id, key, val) {
 	const m = state.resizers.find(p => p.id === id);
 	if (m) {
+		const before = _cloneDeep(m);
 		setField(m, key, val);
-		uniInterface();
-		requestRender();
-		updatePanel();
+		_recordSet('resizer', m, before);
+		uniInterface(); requestRender(); updatePanel();
 	}
 };
 window.updateBumperProp = function(id, key, val) {
 	const m = state.bumpers.find(p => p.id === id);
 	if (m) {
+		const before = _cloneDeep(m);
 		setField(m, key, val);
-		uniInterface();
-		requestRender();
-		updatePanel();
+		_recordSet('bumper', m, before);
+		uniInterface(); requestRender(); updatePanel();
 	}
 };
 window.updateBumperDirEnabled = function(id, dir, enabled) {
 	const m = state.bumpers.find(p => p.id === id);
 	if (m && m[dir]) {
+		const before = _cloneDeep(m);
 		m[dir].enabled = enabled;
-		uniInterface();
-		requestRender();
-		updatePanel();
+		_recordSet('bumper', m, before);
+		uniInterface(); requestRender(); updatePanel();
 	}
 };
 window.updateBumperDir = function(id, dir, key, val) {
 	const m = state.bumpers.find(p => p.id === id);
-	if (m && m[dir]) { m[dir][key] = val;
-		uniInterface();
-		requestRender();
-		updatePanel(); }
+	if (m && m[dir]) {
+		const before = _cloneDeep(m);
+		m[dir][key] = val;
+		_recordSet('bumper', m, before);
+		uniInterface(); requestRender(); updatePanel();
+	}
 };
 window.updateCheckpointProp = function(id, key, val) {
 	const m = state.checkpoints.find(p => p.id === id);
 	if (m) {
+		const before = _cloneDeep(m);
 		setField(m, key, val);
-		uniInterface();
-		requestRender();
-		updatePanel();
+		_recordSet('checkpoint', m, before);
+		uniInterface(); requestRender(); updatePanel();
 	}
 };
 window.updateCameraTriggerProp = function(id, key, val) {
 	const m = state.cameraTriggers.find(p => p.id === id);
 	if (m) {
+		const before = _cloneDeep(m);
 		setField(m, key, val);
-		uniInterface();
-		requestRender();
-		updatePanel();
+		_recordSet('cameratrigger', m, before);
+		uniInterface(); requestRender(); updatePanel();
 	}
 };
 
 window.updateButtonProp = function(id, key, val) {
     const m = state.buttons.find(p => p.id === id);
     if (!m) return;
+    const before = _cloneDeep(m);
 
     if (key === 'movingPlatformID') {
         if (val) {
-            // 绑定移动平台：不碰 x/y/z（保留旧坐标，作为潜在回退）
             m.movingPlatformID = val;
         } else {
-            // 解绑：把移动平台当前位置快照为按钮新坐标
             if (m.movingPlatformID) {
                 const mp = state.movingPlatforms.find(p =>
                     p.id === m.movingPlatformID || p.xmlId === m.movingPlatformID
                 );
                 if (mp) {
                     const pos = getMovingPos(mp);
-                    m.x = pos.x;
-                    m.y = pos.y;
-                    m.z = pos.z + 1;
+                    m.x = pos.x; m.y = pos.y; m.z = pos.z + 1;
                 } else {
-                    // 找不到平台时兜底
                     if (m.x === null || m.x === undefined) m.x = 0;
                     if (m.y === null || m.y === undefined) m.y = 0;
                     if (m.z === null || m.z === undefined) m.z = 0;
@@ -2171,30 +2449,26 @@ window.updateButtonProp = function(id, key, val) {
         setField(m, key, val);
     }
 
+    _recordSet('button', m, before);
     uniInterface();
     requestRender();
     updatePanel();
 };
 		
-// 原函数（替换）
 window.updateButtonChecklist = function(id, field, checkId, checked) {
     const elem = state.buttons.find(b => b.id === id);
     if (!elem) return;
+    const before = _cloneDeep(elem);
     let str = elem[field] || '';
-    // 解析现有条目
     const items = str.split(',').map(s => s.trim()).filter(s => s);
     if (checked) {
-        // 添加：如果该ID不在任何条目中，则添加 id(0)
         const exists = items.some(item => {
             const match = item.match(/^([^(]+)\((\d+)\)$/);
             if (match) return match[1].trim() === checkId;
             return item === checkId;
         });
-        if (!exists) {
-            items.push(checkId);
-        }
+        if (!exists) items.push(checkId);
     } else {
-        // 移除：删除所有匹配该ID的条目（包括带括号的）
         const newItems = items.filter(item => {
             const match = item.match(/^([^(]+)\((\d+)\)$/);
             if (match) return match[1].trim() !== checkId;
@@ -2204,14 +2478,15 @@ window.updateButtonChecklist = function(id, field, checkId, checked) {
         items.push(...newItems);
     }
     elem[field] = items.join(',');
+    _recordSet('button', elem, before);
     uniInterface();
     updatePanel();
 };
 
-// 同理，按钮序列的：
 window.updateButtonSeqChecklist = function(id, field, checkId, checked) {
     const seq = state.buttonSequences.find(b => b.id === id);
     if (!seq) return;
+    const before = _cloneDeep(seq);
     let str = seq[field] || '';
     const items = str.split(',').map(s => s.trim()).filter(s => s);
     if (checked) {
@@ -2220,9 +2495,7 @@ window.updateButtonSeqChecklist = function(id, field, checkId, checked) {
             if (match) return match[1].trim() === checkId;
             return item === checkId;
         });
-        if (!exists) {
-            items.push(checkId);
-        }
+        if (!exists) items.push(checkId);
     } else {
         const newItems = items.filter(item => {
             const match = item.match(/^([^(]+)\((\d+)\)$/);
@@ -2233,48 +2506,48 @@ window.updateButtonSeqChecklist = function(id, field, checkId, checked) {
         items.push(...newItems);
     }
     seq[field] = items.join(',');
+    _recordSet('buttonSequence', seq, before);
     uniInterface();
     updatePanel();
 };
 
-// 更新按钮序列的其他属性（如 sequenceInOrder, triggerAchievements 等）
 window.updateButtonSeqProp = function(id, key, val) {
 	const seq = state.buttonSequences.find(b => b.id === id);
 	if (!seq) return;
+	const before = _cloneDeep(seq);
 	setField(seq, key, val);
+	_recordSet('buttonSequence', seq, before);
 	uniInterface();
 	updatePanel();
 };
 
-
 window.updateButtonAffectData = function(btnId, field, checkId, value) {
     const btn = state.buttons.find(b => b.id === btnId);
     if (!btn) return;
+    const before = _cloneDeep(btn);
     let str = btn[field] || '';
     const items = str.split(',').map(s => s.trim()).filter(s => s);
     const num = parseInt(value, 10);
-    // 移除原有该ID的条目（无论是纯ID还是带括号）
     let filteredItems = items.filter(item => {
         const match = item.match(/^([^(]+)\((\d+)\)$/);
         if (match) return match[1].trim() !== checkId;
         return item !== checkId;
     });
     if (num !== -1 && !isNaN(num)) {
-        // 添加带括号的
         filteredItems.push(`${checkId}(${num})`);
     } else {
-        // 添加纯ID（即不输出数据）
         filteredItems.push(checkId);
     }
     btn[field] = filteredItems.join(',');
+    _recordSet('button', btn, before);
     uniInterface();
     updatePanel();
 };
 
-// 序列版本
 window.updateButtonSeqAffectData = function(seqId, field, checkId, value) {
     const seq = state.buttonSequences.find(b => b.id === seqId);
     if (!seq) return;
+    const before = _cloneDeep(seq);
     let str = seq[field] || '';
     const items = str.split(',').map(s => s.trim()).filter(s => s);
     const num = parseInt(value, 10);
@@ -2289,36 +2562,36 @@ window.updateButtonSeqAffectData = function(seqId, field, checkId, value) {
         filteredItems.push(checkId);
     }
     seq[field] = filteredItems.join(',');
+    _recordSet('buttonSequence', seq, before);
     uniInterface();
     updatePanel();
 };
-// OtherCube / DarkCube 更新
+
 window.updateOtherCubeProp = function(id, key, val) {
 	const m = state.otherCubes.find(p => p.id === id);
 	if (m) {
+		const before = _cloneDeep(m);
 		setField(m, key, val);
-		// 如果修改的是坐标相关，扩展范围
+		_recordSet('othercube', m, before);
 		if (['triggerX','triggerY','triggerZ','cubeX','cubeY','cubeZ'].includes(key)) {
 			expandCanvasRangeForPoint(m.triggerX, m.triggerY, m.triggerZ);
 			expandCanvasRangeForPoint(m.cubeX, m.cubeY, m.cubeZ);
 		}
-		uniInterface();
-		requestRender();
-		updatePanel();
+		uniInterface(); requestRender(); updatePanel();
 	}
 };
 
 window.updateDarkCubeProp = function(id, key, val) {
 	const m = state.darkCubes.find(p => p.id === id);
 	if (m) {
+		const before = _cloneDeep(m);
 		setField(m, key, val);
+		_recordSet('darkcube', m, before);
 		if (['triggerX','triggerY','triggerZ','cubeX','cubeY','cubeZ'].includes(key)) {
 			expandCanvasRangeForPoint(m.triggerX, m.triggerY, m.triggerZ);
 			expandCanvasRangeForPoint(m.cubeX, m.cubeY, m.cubeZ);
 		}
-		uniInterface();
-		requestRender();
-		updatePanel();
+		uniInterface(); requestRender(); updatePanel();
 	}
 };
 
@@ -2333,6 +2606,7 @@ window.updateInternalId = function(internalId, type, newId) {
 	let finalId = newId.trim();
 	if (!finalId) { showToast('编号不能为空'); return; }
 	if (!/^[a-zA-Z0-9]+$/.test(finalId)) { showToast('只允许字母数字'); return; }
+	const before = _cloneDeep(elem);
 	let counter = 0;
 	let candidate = finalId;
 	while (arr.some(e => e.id === candidate && e.id !== internalId)) {
@@ -2340,7 +2614,6 @@ window.updateInternalId = function(internalId, type, newId) {
 		candidate = finalId + 'a'.repeat(counter);
 	}
 	elem.id = candidate;
-	// 自动同步xmlid（如果启用自动命名且类型是 moving/bumper/button）
 	const autoName = state.autoName;
 	if (autoName && (type === 'moving' || type === 'bumper' || type === 'button')) {
 		let xmlCandidate = candidate;
@@ -2351,6 +2624,7 @@ window.updateInternalId = function(internalId, type, newId) {
 		}
 		elem.xmlId = xmlCandidate;
 	}
+	_recordSet(type, elem, before);
 	uniInterface();
 	updatePanel();
 	requestRender();
@@ -2358,14 +2632,7 @@ window.updateInternalId = function(internalId, type, newId) {
 };
 
 window.removeStatic = function(x, y, z) {
-	const layer = state.staticBlocks[z];
-	if (layer && layer[y]) {
-		layer[y][x] = null;
-		if (state.selectedElement && state.selectedElement.type === 'static' &&
-			state.selectedElement.staticCoord.x === x && state.selectedElement.staticCoord.y === y &&
-			state.selectedElement.staticCoord.z === z) {
-			state.selectedElement = null;
-		}
+	if (_deleteStaticAt(x, y, z)) {
 		requestRender();
 		updatePanel();
 		updateStatus();
@@ -2381,6 +2648,8 @@ window.moveWaypoint = function(movingId, idx, delta) {
     if (!m || idx < 1 || idx >= m.waypoints.length) return;
     const newIdx = idx + delta;
     if (newIdx < 1 || newIdx >= m.waypoints.length) return;
+    const before = _cloneDeep(m);
     [m.waypoints[idx], m.waypoints[newIdx]] = [m.waypoints[newIdx], m.waypoints[idx]];
+    _recordSet('moving', m, before);
     uniInterface(); requestRender(); updatePanel(); showToast('路点顺序已调整');
 };

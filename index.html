@@ -10,7 +10,7 @@
     <script src="./js/online/jszip.min.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Edge 关卡xml编辑器3D 1.6.8</title>
+    <title>Edge 关卡编辑器3D 1.7</title><!--16.0-->
     <link rel="icon" type="image/png" sizes="32x32" href="./misc/favicon.png">
     <link rel="apple-touch-icon" href="./misc/favicon.png">
     <style>
@@ -1266,6 +1266,7 @@ html.dark .panel .waypoint-item .wp-label{ color: #e0b050; }
                 <a href="./misc/pic2lvlmap.html" target="_blank">图片转关卡地图</a>
                 <a href="./misc/levelgen.html" target="_blank">关卡生成器</a>
                 <a href="./misc/profedit.html" target="_blank">移动版存档编辑器</a>
+                <a href="./misc/esoviewer.html" target="_blank">ESO模型查看器</a>
             </div>
         </div>
         <button id="settingsBtn">⚙ 设置</button>
@@ -1653,6 +1654,7 @@ html.dark .panel .waypoint-item .wp-label{ color: #e0b050; }
             // ★ 新增：触发 2D 画布和 3D 场景刷新颜色
             if (typeof requestRender === 'function') requestRender();
             if (typeof window.updateThreeTheme === 'function') window.updateThreeTheme();
+            window._clearCSSVarCache();
         });
     }
 

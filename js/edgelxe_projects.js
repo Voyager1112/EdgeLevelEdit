@@ -104,13 +104,104 @@ function getProjectTag(proj) {
 // ---------- 序列化 / 反序列化 ----------
 function captureCurrentData() {
     try {
-        return JSON.parse(_serializeHistory());
-    } catch { return null; }
+        return _cloneDeep({
+            level: state.level,
+            currentLayer: state.currentLayer,
+            staticBlocks: state.staticBlocks,
+            movingPlatforms: state.movingPlatforms,
+            fallingPlatforms: state.fallingPlatforms,
+            prisms: state.prisms,
+            resizers: state.resizers,
+            bumpers: state.bumpers,
+            checkpoints: state.checkpoints,
+            cameraTriggers: state.cameraTriggers,
+            buttons: state.buttons,
+            buttonSequences: state.buttonSequences,
+            otherCubes: state.otherCubes,
+            darkCubes: state.darkCubes,
+            unknownElements: state.unknownElements,
+            nextIdCounter: state.nextIdCounter,
+            _idCounters: state._idCounters,
+            drawMode: state.drawMode,
+            staticColor: state.staticColor,
+            visibility: state.visibility,
+            levelUseAngle: state.levelUseAngle,
+            autoName: state.autoName,
+            keepPrevProps: state.keepPrevProps,
+            canvasEditMode: state.canvasEditMode,
+            settings: state.settings,
+        });
+    } catch (e) {
+        console.warn('captureCurrentData 失败', e);
+        return null;
+    }
 }
 
 function restoreData(data) {
     if (!data) return;
-    _restoreHistory(JSON.stringify(data));
+
+    // 只复制业务字段，避免内部字段被意外覆盖
+    if (data.level) state.level = data.level;
+    if (data.currentLayer !== undefined) state.currentLayer = data.currentLayer;
+    if (data.staticBlocks) state.staticBlocks = data.staticBlocks;
+    state.movingPlatforms   = data.movingPlatforms   || [];
+    state.fallingPlatforms  = data.fallingPlatforms  || [];
+    state.prisms            = data.prisms            || [];
+    state.resizers          = data.resizers          || [];
+    state.bumpers           = data.bumpers           || [];
+    state.checkpoints       = data.checkpoints       || [];
+    state.cameraTriggers    = data.cameraTriggers    || [];
+    state.buttons           = data.buttons           || [];
+    state.buttonSequences   = data.buttonSequences   || [];
+    state.otherCubes        = data.otherCubes        || [];
+    state.darkCubes         = data.darkCubes         || [];
+    state.unknownElements   = data.unknownElements   || [];
+    if (data.nextIdCounter !== undefined) state.nextIdCounter = data.nextIdCounter;
+    if (data._idCounters)                 state._idCounters   = data._idCounters;
+    if (data.drawMode !== undefined)      state.drawMode      = data.drawMode;
+    if (data.staticColor !== undefined)   state.staticColor   = data.staticColor;
+    if (data.visibility)                  state.visibility    = data.visibility;
+    if (data.levelUseAngle !== undefined) state.levelUseAngle = data.levelUseAngle;
+    if (data.autoName !== undefined)      state.autoName      = data.autoName;
+    if (data.keepPrevProps !== undefined) state.keepPrevProps = data.keepPrevProps;
+    if (data.canvasEditMode !== undefined)state.canvasEditMode= data.canvasEditMode;
+    if (data.settings)                    state.settings      = data.settings;
+
+    // 索引全量重建（数组引用都换了）
+    rebuildSpatialIndex();
+    _recalcStaticCounts();
+
+    // 画布范围
+    updateCanvasRangeFromSize();
+    const z = state.currentLayer;
+    if (typeof z === 'number' && !isNaN(z)) {
+        if (z < state.canvasRange.minZ) state.canvasRange.minZ = z;
+        if (z > state.canvasRange.maxZ) state.canvasRange.maxZ = z;
+    }
+    updateLayerMax();
+
+    // 3D / 选中态清理
+    state.highlightedMesh = null;
+    state.selected3D = null;
+    if (typeof threeScene !== 'undefined' && threeScene) clear3DScene();
+    _validateSelectedElement();
+
+    // ★ 数据全变了：撤销栈清空、session 标记清空
+    state._undoStack = [];
+    state._redoStack = [];
+    state._sessionMarker = null;
+
+    // ★ 缓存全量标脏
+    if (typeof _markAllDirty === 'function') _markAllDirty();
+
+    if (typeof _syncToolbarCheckboxes === 'function') _syncToolbarCheckboxes();
+
+    // 界面刷新
+    syncLevelUI();
+    requestRender();
+    updatePanel();
+    updateElemList();
+    updateStatus();
 }
 
 // 把某个项目的 data 转成 XML 字符串（临时替换 state）
@@ -175,33 +266,22 @@ function switchProject(id) {
     if (!id) return;
     if (id === getCurrentProjectId()) return;
 
-    // ★ 1. 切换开始前：立刻清空历史，并进入静默模式（防止内部函数触发 Undo 记录）
+    const prevSuppressUndo = state._suppressUndo;
     state._suppressUndo = true;
-    state._undoStack = [];
-    state._redoStack = [];
-
-    // 2. 保存当前项目数据到独立存储
-    saveCurrentToProject();
-
-    // 3. 切换 ID
-    setCurrentProjectId(id);
-
-    // 4. 读取新项目的数据
-    const data = loadProjectData(id);
-    if (data) {
-        restoreData(data);
-    } else {
-        if (typeof newProject === 'function') newProject();
+    try {
+        state._undoStack = [];
+        state._redoStack = [];
+        saveCurrentToProject();
+        setCurrentProjectId(id);
+        const data = loadProjectData(id);
+        if (data) restoreData(data);
+        else if (typeof newProject === 'function') newProject();
+    } finally {
+        state._suppressUndo = prevSuppressUndo;     // ★ 保证复位
     }
 
-    // ★ 5. 数据加载完毕：恢复非静默模式，并将当前状态设为基线
-    state._suppressUndo = false;
-    state._lastSavedSnapshot = _serializeHistory();
-
-    // ★ 6. 最后再同步保存一次缓存（此时不会产生新撤销）
     if (typeof saveCache === 'function') saveCache();
 
-    // 7. UI 提示
     const store = loadProjectStore();
     const proj = store.projects.find(p => p.id === id);
     showToast(`已切换到项目：${proj ? (proj.name || '(未命名)') : '(未命名)'}`);
@@ -460,7 +540,8 @@ window.PM = {
     duplicate(id) { duplicateProjectFromUI(id); },
     exportZip(id) { exportProjectZip(id); },
     sync() { saveCurrentToProject(); },
-
+    
+    captureCurrentData,
     createProject,
     setCurrentProjectId,
     getCurrentProjectId,

@@ -38,17 +38,21 @@ function init() {
         if (layer0) {
             for (let y = 2; y < 6; y++) for (let x = 2; x < 8; x++) layer0[y][x] = { r: 255, g: 255, b: 128 };
         }
-
+        
+        _recalcStaticCounts();               // ★
         syncLevelUI(); updateCanvasRangeFromSize(); updateLayerMax(); requestRender(); updatePanel(); updateElemList(); updateStatus();
-        state._undoStack = []; state._redoStack = []; state._lastSavedSnapshot = _serializeHistory();
+        state._undoStack = []; state._redoStack = [];
         if (typeof saveCache === 'function') saveCache();
-        if (window.PM && typeof window.PM.createProject === 'function') {
+        if (window.PM && typeof window.PM.createProject === 'function'
+            && typeof window.PM.captureCurrentData === 'function') {
             try {
-                const data = JSON.parse(_serializeHistory());
-                const pid = window.PM.createProject('Demo', data);
-                window.PM.setCurrentProjectId(pid);
-                if (typeof window.PM.sync === 'function') window.PM.sync();
-            } catch (e) {}
+                const data = window.PM.captureCurrentData();
+                if (data) {
+                    const pid = window.PM.createProject('Demo', data);
+                    window.PM.setCurrentProjectId(pid);
+                    if (typeof window.PM.sync === 'function') window.PM.sync();
+                }
+            } catch (e) { console.error(e); }
         }
         showToast('已加载示例数据，并创建 Demo 项目');
     }
@@ -700,6 +704,7 @@ B 通道（模型高度）
         window._lastMouseClickY = e.clientY;
         if (state.canvasEditMode === 'add') {
             state._addSessionActive = true; state._addSessionRecorded = false;
+            state._sessionMarker = state._undoStack ? state._undoStack.length : 0;
             _longPressPos = { x: e.clientX, y: e.clientY };
             const rect = canvas.getBoundingClientRect();
             _longPressCell = { x: currentMinX + Math.floor(((e.clientX - rect.left) * (_logicalW / rect.width) - PADDING) / PIXEL_SIZE), y: currentMinY + Math.floor(((e.clientY - rect.top) * (_logicalH / rect.height) - PADDING) / PIXEL_SIZE) };
@@ -710,6 +715,7 @@ B 通道（模型高度）
         }
         if (state.drawMode !== 'brush') return;
         state.isDrawing = true; state._brushSessionActive = true; state._brushSessionRecorded = false;
+        state._sessionMarker = state._undoStack ? state._undoStack.length : 0;
         _lastBrushPos = null; processClickAt(e.clientX, e.clientY);
     });
 
@@ -741,15 +747,23 @@ B 通道（模型高度）
     });
 
     function handleCanvasLeave() {
+        _flushSessionUndo();
         if (state._addSessionActive) { clearTimeout(_longPressDelayTimer); clearInterval(_longPressTimer); _longPressDelayTimer = null; _longPressTimer = null; state._addSessionActive = false; }
         state.isDrawing = false; state._brushSessionActive = false; _lastBrushPos = null; mouseCoord.textContent = '( -, - )';
+        // ★ 松手后统一刷一次列表
+        if (window._elemListDirty) {
+            window._elemListDirty = false;
+            if (typeof updateElemList === 'function') updateElemList();
+        }
     }
     canvas.addEventListener('mouseup', handleCanvasLeave);
     canvas.addEventListener('mouseleave', handleCanvasLeave);
 
     canvas.addEventListener('touchstart', function(e) {
         if (state.drawMode !== 'brush') return;
-        e.preventDefault(); state.isDrawing = true; state._brushSessionActive = true; _lastBrushPos = null; processClickAt(e.touches[0].clientX, e.touches[0].clientY);
+        e.preventDefault(); state.isDrawing = true; state._brushSessionActive = true; state._brushSessionRecorded = false;
+        state._sessionMarker = state._undoStack ? state._undoStack.length : 0;
+        _lastBrushPos = null; processClickAt(e.touches[0].clientX, e.touches[0].clientY);
     }, { passive: false });
     canvas.addEventListener('touchmove', function(e) {
         if (!state.isDrawing || state.drawMode !== 'brush') return;
@@ -1151,7 +1165,7 @@ B 通道（模型高度）
         if (addCb) { addCb.checked = (state.canvasEditMode === 'add'); }
     })();
 
-	state._lastSavedSnapshot = _serializeHistory(); state._undoStack = []; state._redoStack = [];
+	state._undoStack = []; state._redoStack = [];
 
     (function initManualSaveBtn() {
         const manualBtn = document.getElementById('manualSaveBtn');

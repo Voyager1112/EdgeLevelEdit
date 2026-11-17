@@ -1,3 +1,7 @@
+// ============ 元素列表差异更新缓存 ============
+const _elemListCache = new Map();   // key -> { sig, nodes: HTMLElement[] }
+let _elemListLastFilter = null;
+
 // 工具函数
 function showToast(msg) {
 	toastEl.textContent = msg;
@@ -173,13 +177,98 @@ window.moveSeqButtonInList = function(parentId, idx, delta) {
     updateElemList();   // 刷新列表顺序
 };
 
+// 普通元素（非 buttonsequence）：原 updateElemList 里的 html 拼接逻辑搬过来
+function _renderNormalElemItem(item) {
+    const active = (state.selectedElement && state.selectedElement.type === item.type &&
+                    state.selectedElement.id === item.id) ? 'active' : '';
+
+    let extraButtons = '';
+
+    // checkpoint 排序按钮
+    if (item.type === 'checkpoint') {
+        const idx = state.checkpoints.findIndex(c => c.id === item.id);
+        if (idx !== -1) {
+            extraButtons = `
+                <button class="btn-sm" onclick="event.stopPropagation(); moveCheckpoint(${idx}, -1)" 
+                        style="margin-left:4px;">↑</button>
+                <button class="btn-sm" onclick="event.stopPropagation(); moveCheckpoint(${idx}, 1)" 
+                        style="margin-left:2px;">↓</button>
+            `;
+        }
+    }
+
+    return `<div class="elem-item ${active}" onclick="selectElement('${item.type}', '${item.id}')">
+                <span>${item.desc}</span>
+                ${extraButtons}
+            </div>`;
+}
+
+// buttonsequence 复合块：父项 + 展开的子按钮，整体作为一个更新单元
+function _renderButtonSequenceBlock(item, seq, movingPosMap) {
+    const active = (state.selectedElement && state.selectedElement.type === 'buttonsequence' &&
+                    state.selectedElement.id === item.id) ? 'active' : '';
+
+    const expanded = state.expandedSequences && state.expandedSequences[item.id];
+    const hasChildren = seq.buttons && seq.buttons.length > 0;
+
+    let html = `<div class="elem-item ${active}" onclick="selectElement('${item.type}', '${item.id}')">
+        <span>${item.desc}</span>
+        ${hasChildren ? `<button class="btn-sm" onclick="event.stopPropagation(); toggleSequenceExpand('${item.id}')" 
+                                title="${expanded ? '收起' : '展开'}" style="margin-left:4px;">${expanded ? '▼' : '◀'}</button>` : ''}
+    </div>`;
+
+    if (hasChildren && expanded) {
+        seq.buttons.forEach((btn, idx) => {
+            const subActive = (state.selectedElement &&
+                               state.selectedElement.type === 'seqbutton' &&
+                               state.selectedElement.id === btn.id) ? 'active' : '';
+            const dispId = btn.xmlId ? `${btn.id}(${btn.xmlId})` : btn.id;
+            let subMpStr = btn.movingPlatformID ? `[${btn.movingPlatformID}]` : '';
+            let subCoordStr = '';
+            if (btn.movingPlatformID) {
+                const pos = movingPosMap[btn.movingPlatformID];
+                subCoordStr = pos ? `${pos.x},${pos.y},${pos.z}` : '?';
+            } else if (btn.position) {
+                subCoordStr = `${btn.position.x},${btn.position.y},${btn.position.z}`;
+            } else {
+                subCoordStr = '-';
+            }
+            html += `<div class="elem-item ${subActive}" 
+                          style="padding-left:22px;font-size:11px;"
+                          onclick="selectElement('seqbutton', '${btn.id}')">
+                <span>↳ #${idx+1} ${dispId} ${subMpStr} (${subCoordStr})</span>
+                <span style="display:flex;gap:2px;">
+                    <button class="btn-sm" onclick="event.stopPropagation(); moveSeqButtonInList('${item.id}', ${idx}, -1)">↑</button>
+                    <button class="btn-sm" onclick="event.stopPropagation(); moveSeqButtonInList('${item.id}', ${idx}, 1)">↓</button>
+                </span>
+            </div>`;
+        });
+    }
+    return html;
+}
+
+// 字符串 → DOM 节点数组（只取顶层，多个并列元素用一个 wrapper 解析）
+function _htmlToNodes(html) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    return Array.from(wrap.children);
+}
+
 // 元素列表
 function updateElemList() {
     if (state._suppressUI) return;
     const filterType = document.getElementById('elemFilterSelect')?.value || 'all';
+
+    // filter 变了，全部重建（不同 filter 展示的元素完全不同）
+    if (filterType !== _elemListLastFilter) {
+        _elemListCache.clear();
+        elemListContainer.innerHTML = '';
+        _elemListLastFilter = filterType;
+    }
+
+    // ---- 收集 all（保持原逻辑，一行没改） ----
     const all = [];
     const movingPosMap = {};
-
     state.movingPlatforms.forEach(m => {
         const pos = getMovingPos(m);
         movingPosMap[m.id] = pos;
@@ -199,34 +288,17 @@ function updateElemList() {
     });
     state.checkpoints.forEach(m => all.push({ type: 'checkpoint', id: m.id, desc: `存档 #${m.id} (${m.x},${m.y},${m.z})` }));
     state.cameraTriggers.forEach(m => all.push({ type: 'cameratrigger', id: m.id, desc: `相机 #${m.id} (${m.x},${m.y},${m.z})` }));
-    /*state.buttons.forEach(m => {
-        const displayId = m.xmlId ? `${m.id}(${m.xmlId})` : m.id;
-        let coordStr = '';
-        if (m.movingPlatformID) {
-            const pos = movingPosMap[m.movingPlatformID];
-            if (pos) coordStr = `(${pos.x},${pos.y},${pos.z})`;
-            else coordStr = `(绑定移动平台 #${m.movingPlatformID})`;
-        } else {
-            coordStr = `(${m.x},${m.y},${m.z})`;
-        }
-        all.push({ type: 'button', id: m.id, desc: `按钮 ${displayId} ${coordStr}` });
-    });*/
     state.buttons.forEach(m => {
         const displayId = m.xmlId ? `${m.id}(${m.xmlId})` : m.id;
         let coordStr = '';
         if (m.movingPlatformID) {
             const pos = movingPosMap[m.movingPlatformID];
-            if (pos) coordStr = `${pos.x},${pos.y},${pos.z}`;
-            else coordStr = `?`;
+            coordStr = pos ? `${pos.x},${pos.y},${pos.z}` : '?';
         } else {
             coordStr = `${m.x},${m.y},${m.z}`;
         }
         const mpStr = m.movingPlatformID ? '[' + m.movingPlatformID + ']' : '';
-        all.push({
-            type: 'button',
-            id: m.id,
-            desc: `按钮 ${displayId} ${mpStr} (${coordStr})`
-        });
+        all.push({ type: 'button', id: m.id, desc: `按钮 ${displayId} ${mpStr} (${coordStr})` });
     });
     state.buttonSequences.forEach(m => {
         const count = (m.buttons || []).length;
@@ -235,141 +307,131 @@ function updateElemList() {
     state.otherCubes.forEach(m => all.push({ type: 'othercube', id: m.id, desc: `提示 #${m.id} (触发${m.triggerX},${m.triggerY},${m.triggerZ})` }));
     state.darkCubes.forEach(m => all.push({ type: 'darkcube', id: m.id, desc: `黑暗 #${m.id} (触发${m.triggerX},${m.triggerY},${m.triggerZ})` }));
 
-    // ---- 应用筛选 ----
     let filtered = all;
-    if (filterType !== 'all') {
-        filtered = all.filter(item => item.type === filterType);
-    }
+    if (filterType !== 'all') filtered = all.filter(item => item.type === filterType);
 
     if (filtered.length === 0) {
         elemListContainer.innerHTML = '<div style="color:#5a7a9a;font-size:12px;padding:4px;">暂无元素</div>';
+        _elemListCache.clear();
         return;
     }
 
-    let html = '';
-    filtered.forEach(item => {
-        const active = (state.selectedElement && state.selectedElement.type === item.type && 
-                        state.selectedElement.id === item.id) ? 'active' : '';
+    // ---- 构建 blocks（一个 block = 一组相邻 elem-item） ----
+    const blocks = [];
+    const seenKeys = new Set();
 
-        let extraButtons = '';
-
-        // ---- 存档点排序按钮 ----
-        /*if (item.type === 'checkpoint') {
-            const idx = state.checkpoints.findIndex(c => c.id === item.id);
-            if (idx !== -1) {
-                extraButtons = `
-                    <button onclick="event.stopPropagation(); moveCheckpoint(${idx}, -1)" 
-                            style="background:#1a4a7a;border:none;color:#fff;border-radius:3px;cursor:pointer;padding:0 6px;margin-left:4px;">↑</button>
-                    <button onclick="event.stopPropagation(); moveCheckpoint(${idx}, 1)" 
-                            style="background:#1a4a7a;border:none;color:#fff;border-radius:3px;cursor:pointer;padding:0 6px;margin-left:2px;">↓</button>
-                `;
-            }
-        }
-
-        // ---- 按钮序列展开/收起按钮 ----
+    for (const item of filtered) {
         if (item.type === 'buttonsequence') {
             const seq = state.buttonSequences.find(s => s.id === item.id);
-            if (seq && seq.buttons && seq.buttons.length > 0) {
-                const expanded = state.expandedSequences && state.expandedSequences[item.id];
-                extraButtons = `
-                    <button onclick="event.stopPropagation(); toggleSequenceExpand('${item.id}')" 
-                            title="${expanded ? '收起' : '展开'}"
-                            style="background:#1a4a7a;border:none;color:#fff;border-radius:3px;cursor:pointer;padding:0 6px;margin-left:4px;">${expanded ? '▼' : '◀'}</button>
-                `;
-            }
-        }*/
-        
-        // ---- 存档点排序按钮 ----
-        if (item.type === 'checkpoint') {
-            const idx = state.checkpoints.findIndex(c => c.id === item.id);
-            if (idx !== -1) {
-                extraButtons = `
-                    <button class="btn-sm" onclick="event.stopPropagation(); moveCheckpoint(${idx}, -1)" 
-                            style="margin-left:4px;">↑</button>
-                    <button class="btn-sm" onclick="event.stopPropagation(); moveCheckpoint(${idx}, 1)" 
-                            style="margin-left:2px;">↓</button>
-                `;
+            if (seq) {
+                const key = `block:bs:${item.id}`;
+                const html = _renderButtonSequenceBlock(item, seq, movingPosMap);
+                blocks.push({ key, sig: html, html });
+                seenKeys.add(key);
+                continue;
             }
         }
+        const key = `${item.type}:${item.id}`;
+        const html = _renderNormalElemItem(item);
+        blocks.push({ key, sig: html, html });
+        seenKeys.add(key);
+    }
 
-        // ---- 按钮序列展开/收起按钮 ----
-        if (item.type === 'buttonsequence') {
-            const seq = state.buttonSequences.find(s => s.id === item.id);
-            if (seq && seq.buttons && seq.buttons.length > 0) {
-                const expanded = state.expandedSequences && state.expandedSequences[item.id];
-                extraButtons = `
-                    <button class="btn-sm" onclick="event.stopPropagation(); toggleSequenceExpand('${item.id}')" 
-                            title="${expanded ? '收起' : '展开'}" style="margin-left:4px;">${expanded ? '▼' : '◀'}</button>
-                `;
-            }
+    // ---- "创建按钮序列"按钮单独保存，不参与 diff ----
+    let addBtnWrap = elemListContainer.querySelector('[data-role="elem-add-btn"]');
+    if (addBtnWrap) addBtnWrap.remove();
+    else {
+        addBtnWrap = document.createElement('div');
+        addBtnWrap.dataset.role = 'elem-add-btn';
+        addBtnWrap.style.padding = '4px 0';
+        addBtnWrap.innerHTML = '<button class="add-btn" onclick="addButtonSequence()">+ 创建按钮序列</button>';
+    }
+
+    // ---- 差异更新 ----
+    const finalNodes = [];
+    for (const block of blocks) {
+        const cached = _elemListCache.get(block.key);
+        if (!cached || cached.sig !== block.sig) {
+            // 变化：重建该块的 DOM
+            if (cached) cached.nodes.forEach(n => n.remove());
+            const nodes = _htmlToNodes(block.html);
+            nodes.forEach(n => n.dataset.elemKey = block.key);
+            _elemListCache.set(block.key, { sig: block.sig, nodes });
+            finalNodes.push(...nodes);
+        } else {
+            finalNodes.push(...cached.nodes);
         }
+    }
 
-        html += `
-            <div class="elem-item ${active}" onclick="selectElement('${item.type}', '${item.id}')">
-                <span>${item.desc}</span>
-                ${extraButtons}
-            </div>
-        `;
-
-        // ---- 展开的子按钮列表 ----
-        if (item.type === 'buttonsequence') {
-            const seq = state.buttonSequences.find(s => s.id === item.id);
-            const expanded = state.expandedSequences && state.expandedSequences[item.id];
-            if (seq && expanded && seq.buttons && seq.buttons.length > 0) {
-                seq.buttons.forEach((btn, idx) => {
-                    const subActive = (state.selectedElement &&
-                                       state.selectedElement.type === 'seqbutton' &&
-                                       state.selectedElement.id === btn.id) ? 'active' : '';
-                    const dispId = btn.xmlId ? `${btn.id}(${btn.xmlId})` : btn.id;
-                    // ★ 移除了写死的深色背景 subBg
-
-                    // ---- 计算所属移动平台和坐标 ----
-                    let subMpStr = btn.movingPlatformID ? `[${btn.movingPlatformID}]` : '';
-                    let subCoordStr = '';
-                    if (btn.movingPlatformID) {
-                        const pos = movingPosMap[btn.movingPlatformID];
-                        if (pos) subCoordStr = `${pos.x},${pos.y},${pos.z}`;
-                        else subCoordStr = '?';
-                    } else if (btn.position) {
-                        subCoordStr = `${btn.position.x},${btn.position.y},${btn.position.z}`;
-                    } else {
-                        subCoordStr = '-';
-                    }
-
-                    html += `
-                        <div class="elem-item ${subActive}" 
-                             style="padding-left:22px;font-size:11px;"
-                             onclick="selectElement('seqbutton', '${btn.id}')">
-                            <span>↳ #${idx+1} ${dispId} ${subMpStr} (${subCoordStr})</span>
-                            <span style="display:flex;gap:2px;">
-                                <button class="btn-sm" onclick="event.stopPropagation(); moveSeqButtonInList('${item.id}', ${idx}, -1)">↑</button>
-                                <button class="btn-sm" onclick="event.stopPropagation(); moveSeqButtonInList('${item.id}', ${idx}, 1)">↓</button>
-                            </span>
-                        </div>
-                    `;
-                });
-            }
+    // 删除已不存在的块
+    _elemListCache.forEach((entry, key) => {
+        if (!seenKeys.has(key)) {
+            entry.nodes.forEach(n => n.remove());
+            _elemListCache.delete(key);
         }
     });
-    html += `<div style="padding:4px 0;"><button class="add-btn" onclick="addButtonSequence()">+ 创建按钮序列</button></div>`;
-    elemListContainer.innerHTML = html;
+
+    // ---- 判断现有顺序是否需要重排（关键：顺序没变就不碰 DOM） ----
+    const currentChildren = Array.from(elemListContainer.children).filter(n => !n.dataset.role);
+    let needsReorder = currentChildren.length !== finalNodes.length;
+    if (!needsReorder) {
+        for (let i = 0; i < finalNodes.length; i++) {
+            if (currentChildren[i] !== finalNodes[i]) { needsReorder = true; break; }
+        }
+    }
+    if (needsReorder) {
+        const frag = document.createDocumentFragment();
+        finalNodes.forEach(n => frag.appendChild(n));
+        elemListContainer.insertBefore(frag, elemListContainer.firstChild);
+    }
+
+    // 追加回"创建按钮序列"
+    elemListContainer.appendChild(addBtnWrap);
+
     refreshUnifiedBaseList();
+}
+
+let _lastUnifiedBaseSig = null;
+
+function refreshUnifiedBaseList() {
+    // 签名：所有有 xmlId 的平台 + 它们的坐标
+    const parts = [];
+    for (const m of state.movingPlatforms) {
+        if (!m.xmlId) continue;
+        const pos = getMovingPos(m);
+        parts.push(`${m.xmlId}@${pos.x},${pos.y},${pos.z}`);
+    }
+    const sig = parts.join('|');
+    if (sig === _lastUnifiedBaseSig) return;
+    _lastUnifiedBaseSig = sig;
+
+    const currentVal = unifiedSelect.value;
+    unifiedSelect.innerHTML = '<option value="">— 选择基准移动平台 —</option>';
+    state.movingPlatforms.forEach(m => {
+        if (!m.xmlId) return;
+        const pos = getMovingPos(m);
+        const label = `${m.xmlId} (${pos.x},${pos.y},${pos.z})`;
+        const opt = document.createElement('option');
+        opt.value = m.xmlId;
+        opt.textContent = label;
+        unifiedSelect.appendChild(opt);
+    });
+    if (currentVal && [...unifiedSelect.options].some(o => o.value === currentVal)) {
+        unifiedSelect.value = currentVal;
+    } else {
+        unifiedSelect.value = '';
+        state.unifiedMovement.baseId = null;
+        state.unifiedMovement.basePos = null;
+    }
 }
 
 function updateStatus() {
     if (state._suppressUI) return;
-	let sc = 0;
-	for (const z in state.staticBlocks) {
-		const layer = state.staticBlocks[z];
-        if (!layer) continue; // ★ 跳过空层
-		for (let y = 0; y < layer.length; y++) {
-			for (let x = 0; x < layer[y].length; x++) {
-				if (layer[y][x]) sc++;
-			}
-		}
-	}
-	statusRight.textContent =
-		`静态: ${sc} | 移动: ${state.movingPlatforms.length} | 掉落: ${state.fallingPlatforms.length} | 棱柱: ${state.prisms.length} | 放大: ${state.resizers.filter(r=>r.type==='grow').length} | 缩小: ${state.resizers.filter(r=>r.type==='shrink').length} | 撞击: ${state.bumpers.length} | 存档: ${state.checkpoints.length} | 相机: ${state.cameraTriggers.length} | 按钮: ${state.buttons.length} | 提示: ${state.otherCubes.length} | 黑暗: ${state.darkCubes.length} | 按钮序列: ${state.buttonSequences.length}`;
+    let sc = 0;
+    const c = state._staticCounts || {};
+    for (const z in c) sc += c[z];
+    const text = `静态: ${sc} | 移动: ${state.movingPlatforms.length} | 掉落: ${state.fallingPlatforms.length} | 棱柱: ${state.prisms.length} | 放大: ${state.resizers.filter(r=>r.type==='grow').length} | 缩小: ${state.resizers.filter(r=>r.type==='shrink').length} | 撞击: ${state.bumpers.length} | 存档: ${state.checkpoints.length} | 相机: ${state.cameraTriggers.length} | 按钮: ${state.buttons.length} | 提示: ${state.otherCubes.length} | 黑暗: ${state.darkCubes.length} | 按钮序列: ${state.buttonSequences.length}`;
+    if (statusRight.textContent !== text) statusRight.textContent = text;
 }
 
 // 缩放
@@ -385,62 +447,30 @@ function setZoom(value) {
 
 
 function clearLayer() {
-    const z = state.currentLayer;
-    if (!state.staticBlocks[z]) { showToast('该层已是空的'); return; }
-    if (!confirm(`清空第 ${z} 层所有静态方块？`)) return;
-    
-    // ★ 直接删除该层的引用，交给 GC 回收
-    delete state.staticBlocks[z]; 
-    
-    if (state.selectedElement && state.selectedElement.type === 'static' && state.selectedElement.staticCoord.z === z) {
-        state.selectedElement = null;
-    }
-    requestRender();
-    updatePanel();
-    updateStatus();
-    uniInterface();
-    showToast(`第 ${z} 层已清空`);
+  const z = state.currentLayer;
+  if (!state.staticBlocks[z]) { showToast('该层已是空的'); return; }
+  if (!confirm(`清空第 ${z} 层所有静态方块？`)) return;
+  const before = _cloneDeep(state.staticBlocks[z]);        // ★
+  delete state.staticBlocks[z];
+  delete state._staticCounts[z];
+  _recordStep({ kind: 'layerClear', z, before, after: null });// ★
+  _dropLayerIndex(z);                                      // ★
+  _markDirty(`layer_${z}`);                                // ★
+  if (state.selectedElement && state.selectedElement.type === 'static' && state.selectedElement.staticCoord.z === z) {
+    state.selectedElement = null;
+  }
+  requestRender(); updatePanel(); updateStatus(); uniInterface(); showToast(`第 ${z} 层已清空`);
 }
 
 function changeLayer() {
-    let z = parseInt(layerInput.value) || 0;
-    const { minZ, maxZ } = getLayerRange();
-    if (z < minZ) z = minZ;
-    else if (z > maxZ) z = maxZ;
-
-    const oldLayer = state.currentLayer;
-
-    // 层数没变：只同步 input，不记历史
-    if (z === oldLayer) {
-        layerInput.value = z;
-        return;
-    }
-
-    // ★ 切层前先入栈一份"当前状态（旧层）"快照
-    // 这样撤销第一步会回到旧层，第二步再撤销才是切层前的操作
-    if (!state._suppressUndo) {
-        if (!state._undoStack) state._undoStack = [];
-        if (!state._redoStack) state._redoStack = [];
-        const snap = state._lastSavedSnapshot;
-        const top = state._undoStack[state._undoStack.length - 1];
-        if (snap !== undefined && snap !== top) {
-            state._undoStack.push(snap);
-            if (state._undoStack.length > UNDO_MAX) state._undoStack.shift();
-            state._redoStack.length = 0;
-        }
-    }
-
-    // 应用新层数
-    state.currentLayer = z;
-    layerInput.value = z;
-    state.selectedElement = null;
-
-    // 切层后的新基线：内容不变，只是 layer 变了
-    state._lastSavedSnapshot = _serializeHistory();
-
-    requestRender();
-    updatePanel();
-    updateElemList();
+  let z = parseInt(layerInput.value) || 0;
+  const { minZ, maxZ } = getLayerRange();
+  if (z < minZ) z = minZ; else if (z > maxZ) z = maxZ;
+  const old = state.currentLayer;
+  if (z === old) { layerInput.value = z; return; }
+  _recordStep({ kind: 'layer', before: old, after: z });   // ★
+  state.currentLayer = z; layerInput.value = z; state.selectedElement = null;
+  requestRender(); updatePanel(); updateElemList();
 }
 
 function getLayerRange() {
@@ -720,124 +750,6 @@ function changeLayerBy(delta) {
     changeLayer(); // changeLayer 内部会根据 minZ/maxZ 做 clamp，并刷新渲染
 }
 
-// ===== 撤销 / 重做 =====
-const UNDO_MAX = 50;
-
-function _serializeHistory() {
-    return JSON.stringify({
-        level: state.level,
-        currentLayer: state.currentLayer,
-        staticBlocks: state.staticBlocks,
-        movingPlatforms: state.movingPlatforms,
-        fallingPlatforms: state.fallingPlatforms,
-        prisms: state.prisms,
-        resizers: state.resizers,
-        bumpers: state.bumpers,
-        checkpoints: state.checkpoints,
-        cameraTriggers: state.cameraTriggers,
-        buttons: state.buttons,
-        buttonSequences: state.buttonSequences,
-        otherCubes: state.otherCubes,
-        darkCubes: state.darkCubes,
-        unknownElements: state.unknownElements,
-        nextIdCounter: state.nextIdCounter,
-        _idCounters: state._idCounters,
-        /*drawMode: state.drawMode,
-        staticColor: state.staticColor,
-        visibility: state.visibility,
-        levelUseAngle: state.levelUseAngle,
-        autoName: state.autoName,*/
-    });
-}
-
-function _restoreHistory(str) {
-    const data = JSON.parse(str);
-    Object.assign(state, data);
-    rebuildSpatialIndex();
-    updateCanvasRangeFromSize();
-    
-    // ← 新增：把当前层纳入范围，避免被 updateLayerMax 钳制
-    const z = state.currentLayer;
-    if (typeof z === 'number' && !isNaN(z)) {
-        if (z < state.canvasRange.minZ) state.canvasRange.minZ = z;
-        if (z > state.canvasRange.maxZ) state.canvasRange.maxZ = z;
-    }
-
-    updateLayerMax();
-    //state.selectedElement = null;
-    state.highlightedMesh = null;
-    if (typeof threeScene !== 'undefined' && threeScene) clear3DScene();
-    _validateSelectedElement();
-    
-    syncLevelUI();
-    requestRender();
-    updatePanel();
-    updateElemList();
-    updateStatus();
-    // 注意：这里不调 saveCache，避免递归
-    try {
-        localStorage.setItem(CACHE_KEY, str);
-    } catch (e) {}
-}
-
-// 由 saveCache 内部自动调用；也可以手动调用
-window.pushUndo = function() {
-    if (state._suppressUndo) return;
-    if (!state._undoStack) state._undoStack = [];
-    if (!state._redoStack) state._redoStack = [];
-    const snap = state._lastSavedSnapshot;
-    if (snap === undefined) return;
-
-    // ---- 画笔 session：整段只记录一次 ----
-    /*if (state._brushSessionActive) {
-        if (state._brushSessionRecorded) return;   // 已经记过，跳过
-        state._brushSessionRecorded = true;
-    }*/
-    // 画笔/长按 session：整段只记录一次
-    if (state._brushSessionActive || state._addSessionActive) {
-        if (state._brushSessionRecorded || state._addSessionRecorded) return;
-        if (state._brushSessionActive) state._brushSessionRecorded = true;
-        if (state._addSessionActive) state._addSessionRecorded = true;
-    }
-    // ---- session 结束 ----
-
-    if (state._undoStack.length > 0 &&
-        state._undoStack[state._undoStack.length - 1] === snap) return;
-    state._undoStack.push(snap);
-    if (state._undoStack.length > UNDO_MAX) state._undoStack.shift();
-    state._redoStack.length = 0;
-};
-
-window.undo = function() {
-    if (!state._undoStack || state._undoStack.length === 0) {
-        showToast('没有可撤销的操作');
-        return;
-    }
-    state._suppressUndo = true;
-    const current = _serializeHistory();
-    const prev = state._undoStack.pop();
-    state._redoStack.push(current);
-    state._lastSavedSnapshot = prev;   // 同步基线，防止后续 saveCache 误判
-    _restoreHistory(prev);
-    state._suppressUndo = false;
-    showToast('已撤销');
-};
-
-window.redo = function() {
-    if (!state._redoStack || state._redoStack.length === 0) {
-        showToast('没有可重做的操作');
-        return;
-    }
-    state._suppressUndo = true;
-    const current = _serializeHistory();
-    const next = state._redoStack.pop();
-    state._undoStack.push(current);
-    state._lastSavedSnapshot = next;
-    _restoreHistory(next);
-    state._suppressUndo = false;
-    showToast('已重做');
-};
-
 function _validateSelectedElement() {
     const sel = state.selectedElement;
     if (!sel) return;
@@ -881,108 +793,6 @@ function _validateSelectedElement() {
         state.selectedElement = null;
     }
 }
-
-// ===== 存储压缩/解压工具 =====
-
-// 将 staticBlocks 压平为 Base64 字符串，大幅降低体积
-/*function compressDataForStorage(data) {
-    if (!data || !data.staticBlocks || !data.level || !data.level.size) return data;
-    
-    const w = data.level.size.w;
-    const l = data.level.size.l;
-    const h = data.level.size.h;
-    const staticBlocks = data.staticBlocks;
-    
-    // 使用 Uint8Array 存储每个方块的 r, g, b, a (a=0表示空，255表示有)
-    const total = w * l * h;
-    const buffer = new Uint8Array(total * 4);
-    let idx = 0;
-    for (let z = 0; z < h; z++) {
-        const layer = staticBlocks[z];
-        for (let y = 0; y < l; y++) {
-            for (let x = 0; x < w; x++) {
-                const block = layer && layer[y] && layer[y][x];
-                if (block) {
-                    buffer[idx++] = block.r;
-                    buffer[idx++] = block.g;
-                    buffer[idx++] = block.b;
-                    buffer[idx++] = 255;
-                } else {
-                    idx += 3;
-                    buffer[idx++] = 0;
-                }
-            }
-        }
-    }
-    
-    // 转成 Base64 (分块处理防止调用栈溢出)
-    let str = '';
-    const chunk = 8192;
-    for (let i = 0; i < buffer.length; i += chunk) {
-        str += String.fromCharCode.apply(null, buffer.subarray(i, i + chunk));
-    }
-    const b64 = btoa(str);
-    
-    const copy = { ...data };
-    copy.staticBlocksCompressed = b64;
-    delete copy.staticBlocks;
-    return copy;
-}*/
-
-// 从存储数据还原 staticBlocks
-/*function decompressDataFromStorage(data) {
-    if (!data || !data.staticBlocksCompressed) return data;
-    
-    const w = data.level.size.w;
-    const l = data.level.size.l;
-    const h = data.level.size.h;
-    const b64 = data.staticBlocksCompressed;
-    
-    const binaryString = atob(b64);
-    const len = binaryString.length;
-    const buffer = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        buffer[i] = binaryString.charCodeAt(i);
-    }
-    
-    /*const staticBlocks = {};
-    let idx = 0;
-    for (let z = 0; z < h; z++) {
-        staticBlocks[z] = Array.from({ length: l }, () => Array(w).fill(null));
-        for (let y = 0; y < l; y++) {
-            for (let x = 0; x < w; x++) {
-                if (idx + 3 < len && buffer[idx + 3] > 0) {
-                    staticBlocks[z][y][x] = { r: buffer[idx], g: buffer[idx+1], b: buffer[idx+2] };
-                }
-                idx += 4;
-            }
-        }
-    }*//*
-    
-    const staticBlocks = {};
-    let idx = 0;
-    for (let z = 0; z < h; z++) {
-        let layer = null; // ★ 延迟创建
-        for (let y = 0; y < l; y++) {
-            for (let x = 0; x < w; x++) {
-                if (idx + 3 < len && buffer[idx + 3] > 0) {
-                    // ★ 遇到方块，才分配内存
-                    if (!layer) {
-                        layer = Array.from({ length: l }, () => Array(w).fill(null));
-                        staticBlocks[z] = layer;
-                    }
-                    layer[y][x] = { r: buffer[idx], g: buffer[idx+1], b: buffer[idx+2] };
-                }
-                idx += 4;
-            }
-        }
-    }
-    
-    const copy = { ...data };
-    copy.staticBlocks = staticBlocks;
-    delete copy.staticBlocksCompressed;
-    return copy;
-}*/
 
 const CACHE_FORMAT_VERSION = 2;
 
@@ -1117,3 +927,13 @@ window.showCustomPrompt = function(title, defaultValue = '') {
         };
     });
 };
+
+function _syncToolbarCheckboxes() {
+    const keepCb = document.getElementById('keepPrevProps');
+    if (keepCb) keepCb.checked = !!state.keepPrevProps;
+    const autoCb = document.getElementById('autoNameCheck');
+    if (autoCb) autoCb.checked = !!state.autoName;
+    const addCb = document.getElementById('canvasAddMode');
+    if (addCb) addCb.checked = (state.canvasEditMode === 'add');
+}
+window._syncToolbarCheckboxes = _syncToolbarCheckboxes;

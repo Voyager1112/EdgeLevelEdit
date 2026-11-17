@@ -1,6 +1,19 @@
 // 更新面板（已扩展其他元素）
+let _lastPanelHtml = null;
+let _panelJustChanged = false;
+
+// 返回 true = 内容变了，DOM 被重建；false = 内容相同，什么都没做
+function _setPanelHtml(html) {
+    if (html === _lastPanelHtml) return false;
+    _lastPanelHtml = html;
+    _setPanelHtml(html);
+    _panelJustChanged = true;
+    return true;
+}
+
 function updatePanel() {
     if (state._suppressUI) return;
+    _panelJustChanged = false;
 	const savedScrollTop = panelContent.scrollTop;
 	// 保存子列表滚动位置（如果存在）
 	const seqList = document.getElementById('seqButtonList');
@@ -20,7 +33,7 @@ function updatePanel() {
 	try {
 		const sel = state.selectedElement;
 		if (!sel) {
-			panelContent.innerHTML = `<div class="empty-msg">点击画布上的元素查看属性</div>`;
+			_setPanelHtml(`<div class="empty-msg">点击画布上的元素查看属性</div>`);
 			return;
 		}
 
@@ -64,7 +77,7 @@ function updatePanel() {
 					<button onclick="applyStaticPreset(${x},${y},${z},${block.r},${block.g},35)">掉落</button>
 				</div>
 			`;
-			panelContent.innerHTML = html;
+			_setPanelHtml(html);
 			return;
 		}
 
@@ -98,13 +111,13 @@ function updatePanel() {
 				}
 			}
 			if (!parentSeq) {
-				panelContent.innerHTML = `<div class="empty-msg">子按钮所属序列未找到</div>`;
+				_setPanelHtml(`<div class="empty-msg">子按钮所属序列未找到</div>`);
 				state.selectedElement = null;
 				return;
 			}
 			const btn = parentSeq.buttons.find(b => b.id === sel.id);
 			if (!btn) {
-				panelContent.innerHTML = `<div class="empty-msg">子按钮不存在</div>`;
+				_setPanelHtml(`<div class="empty-msg">子按钮不存在</div>`);
 				state.selectedElement = null;
 				return;
 			}
@@ -164,7 +177,7 @@ function updatePanel() {
 					<button class="btn-sm btn-danger" onclick="unbindSeqButton('${parentSeqId}','${btn.id}')">解绑为普通按钮</button>
 				</div>
 			`;
-			panelContent.innerHTML = html;
+			_setPanelHtml(html);
 			return;
 		}
 		if (sel.type === 'othercube_trigger' || sel.type === 'othercube_cube') realType = 'othercube';
@@ -176,7 +189,7 @@ function updatePanel() {
 		}
 
 		if (!elem) {
-			panelContent.innerHTML = `<div class="empty-msg">元素已删除</div>`;
+			_setPanelHtml(`<div class="empty-msg">元素已删除</div>`);
 			state.selectedElement = null;
 			return;
 		}
@@ -276,8 +289,7 @@ function updatePanel() {
 					<button class="add-btn" onclick="addWaypoint('${elem.id}')">+ 添加路点</button>
 				</div>
 			`;
-			panelContent.innerHTML = html;
-			renderWaypoints(elem);
+			if (_setPanelHtml(html)) renderWaypoints(elem);    // 调用 + 用返回值，一步 + 只有真变了才渲染路点
 			break;
 
 			case 'falling':
@@ -291,7 +303,7 @@ function updatePanel() {
 						<input type="number" value="${elem.floatTime}" min="0" onchange="updateFallingProp('${elem.id}','floatTime',parseInt(this.value))">
 					</div>
 				`;
-				panelContent.innerHTML = html;
+				_setPanelHtml(html);
 				break;
 
 			case 'prism':
@@ -305,7 +317,7 @@ function updatePanel() {
 						<input type="number" value="${elem.energy}" min="0" max="255" onchange="updatePrismProp('${elem.id}','energy',parseInt(this.value))">
 					</div>
 				`;
-				panelContent.innerHTML = html;
+				_setPanelHtml(html);
 				break;
 
 			case 'resizer':
@@ -326,7 +338,7 @@ function updatePanel() {
 						<input type="number" value="${elem.radiusY}" min="0" onchange="updateResizerProp('${elem.id}','radiusY',parseInt(this.value))" style="width:50px;">
 					</div>
 				`;
-				panelContent.innerHTML = html;
+				_setPanelHtml(html);
 				break;
 
 			case 'bumper':
@@ -364,7 +376,7 @@ function updatePanel() {
 						}).join('')}
 					</div>
 				`;
-				panelContent.innerHTML = html;
+				_setPanelHtml(html);
 				break;
 
 			case 'checkpoint':
@@ -382,7 +394,7 @@ function updatePanel() {
 						<input type="number" value="${elem.radiusY}" min="0" onchange="updateCheckpointProp('${elem.id}','radiusY',parseInt(this.value))" style="width:50px;">
 					</div>
 				`;
-				panelContent.innerHTML = html;
+				_setPanelHtml(html);
 				break;
 
 			case 'cameratrigger':
@@ -425,7 +437,7 @@ function updatePanel() {
 						</select>
 					</div>
 				`;
-				panelContent.innerHTML = html;
+				_setPanelHtml(html);
 				break;
 
 			case 'button': {
@@ -538,62 +550,7 @@ function updatePanel() {
 						</div>
 					</div>
 				`;
-				panelContent.innerHTML = html;
-				break;
-			}
-
-			case 'seqbutton': {
-				// 查找所属序列
-				let parentSeq = null;
-				let parentSeqId = null;
-				for (let seq of state.buttonSequences) {
-					if (seq.buttons && seq.buttons.some(b => b.id === elem.id)) {
-						parentSeq = seq;
-						parentSeqId = seq.id;
-						break;
-					}
-				}
-				if (!parentSeq) {
-					panelContent.innerHTML = `<div class="empty-msg">子按钮所属序列未找到</div>`;
-					return;
-				}
-				const btn = elem;
-				const idx = parentSeq.buttons.indexOf(btn);
-				let html = `
-					<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-						<span class="color-dot" style="background:#FFAA44;"></span>
-						<strong>序列子按钮 #${btn.id}</strong>
-						<span style="color:var(--text-dim);font-size:12px;">所属序列: #${parentSeqId}</span>
-						<button class="remove-btn" onclick="removeButtonSequenceButton('${parentSeqId}', ${idx})">✕</button>
-					</div>
-					<div class="prop-row"><label>编号</label><input type="text" value="${btn.id}" onchange="updateButtonSequenceButtonProp('${parentSeqId}', ${idx}, 'id', this.value)" style="flex:0 1 80px;"></div>
-					<div class="prop-row"><label>ID</label><input type="text" value="${btn.xmlId||''}" onchange="updateButtonSequenceButtonXmlId('${parentSeqId}', ${idx}, this.value)" style="flex:0 1 80px;" placeholder="留空则不输出"></div>
-					<div class="prop-row"><button class="btn-sm" onclick="syncButtonSequenceButtonXmlId('${parentSeqId}', ${idx})">同步编号到ID</button></div>
-					<div class="prop-row"><label>可见</label>
-						<select onchange="updateButtonSequenceButtonProp('${parentSeqId}', ${idx}, 'visible', this.value==='null' ? null : (this.value==='true'))">
-							<option value="true"  ${btn.visible === true  ? 'selected' : ''}>是</option>
-							<option value="false" ${btn.visible === false ? 'selected' : ''}>否</option>
-							<option value="null"  ${btn.visible === null  ? 'selected' : ''}>半透明</option>
-						</select>
-					</div>
-					<div class="prop-row"><label>位置 (X,Y,Z)</label>
-						<input type="number" value="${btn.position ? btn.position.x : ''}" onchange="updateButtonSequenceButtonPos('${parentSeqId}', ${idx}, 'x', parseInt(this.value) || 0)" style="width:50px;" ${btn.movingPlatformID ? 'disabled' : ''}>
-						<input type="number" value="${btn.position ? btn.position.y : ''}" onchange="updateButtonSequenceButtonPos('${parentSeqId}', ${idx}, 'y', parseInt(this.value) || 0)" style="width:50px;" ${btn.movingPlatformID ? 'disabled' : ''}>
-						<input type="number" value="${btn.position ? btn.position.z : ''}" onchange="updateButtonSequenceButtonPos('${parentSeqId}', ${idx}, 'z', parseInt(this.value) || 0)" style="width:50px;" ${btn.movingPlatformID ? 'disabled' : ''}>
-						${btn.movingPlatformID ? '<span style="color:var(--text-faint);font-size:11px;">(由移动平台决定)</span>' : ''}
-					</div>
-					<div class="prop-row"><label>移动平台ID (二选一)</label>
-						<select onchange="updateButtonSequenceButtonMovingPlatform('${parentSeqId}', ${idx}, this.value)" style="flex:2;">
-							<option value="">无</option>
-							${state.movingPlatforms.filter(m => m.xmlId).map(m => `<option value="${m.xmlId}" ${btn.movingPlatformID===m.xmlId?'selected':''}>${m.xmlId}</option>`).join('')}
-						</select>
-					</div>
-					<div class="prop-row" style="margin-top:6px;">
-						<button class="btn-sm" onclick="selectElement('buttonsequence','${parentSeqId}')">跳转到序列</button>
-						<button class="btn-sm btn-danger" onclick="unbindSeqButton('${parentSeqId}','${btn.id}')">解绑为普通按钮</button>
-					</div>
-				`;
-				panelContent.innerHTML = html;
+				_setPanelHtml(html);
 				break;
 			}
 
@@ -719,7 +676,7 @@ function updatePanel() {
 						</div>
 					</div>
 				`;
-				panelContent.innerHTML = html;
+				_setPanelHtml(html);
 				break;
 			}
 
@@ -858,7 +815,7 @@ function updatePanel() {
 						</div>
 					</div>
 				`;
-				panelContent.innerHTML = html;
+				_setPanelHtml(html);
 				break;
 			}
 
@@ -920,31 +877,24 @@ function updatePanel() {
 						</div>
 					</div>
 				`;
-				panelContent.innerHTML = html;
+				_setPanelHtml(html);
 				break;
 			}
 
 			default:
-				panelContent.innerHTML = `<div class="empty-msg">未知元素类型</div>`;
+				_setPanelHtml(`<div class="empty-msg">未知元素类型</div>`);
 		}
 		
-	} finally {
-		// 恢复滚动位置（确保在 DOM 更新后执行）
-		requestAnimationFrame(() => {
-			panelContent.scrollTop = savedScrollTop;
-			// 恢复子列表滚动位置
-			const seqList2 = document.getElementById('seqButtonList');
-			if (seqList2) {
-				seqList2.scrollTop = savedSeqScrollTop;
-			}
-			// ===== 新增：恢复 wpList 滚动位置 =====
-            const wpList2 = document.getElementById('wpList');
-            if (wpList2) {
-                wpList2.scrollTop = savedWpScrollTop;
-            }
-            // ===== 新增结束 =====
-
-		});
-		fixFormFieldAssociations(panelContent);
-	}
+    } finally {
+        if (_panelJustChanged) {                        // ★ 只在真变了时才恢复/修复
+            requestAnimationFrame(() => {
+                panelContent.scrollTop = savedScrollTop;
+                const seqList2 = document.getElementById('seqButtonList');
+                if (seqList2) seqList2.scrollTop = savedSeqScrollTop;
+                const wpList2 = document.getElementById('wpList');
+                if (wpList2) wpList2.scrollTop = savedWpScrollTop;
+            });
+            fixFormFieldAssociations(panelContent);
+        }
+    }
 }

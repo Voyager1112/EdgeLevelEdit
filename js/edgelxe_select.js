@@ -1,14 +1,22 @@
-// 全局变量..
+// 全局变量
 var _selBox = null;   // 拖拽中的选框 {x0,y0,x1,y1}
-// state.multiSelection 已在 edgelxe_elem.js 的 state 里定义
+var _msInited = false;
 
 function initMultiSelect() {
+    if (_msInited) return;
     if (!canvas) return;
+    // 等 init() 把 canvas 挂到 gridEl
+    if (typeof gridEl !== 'undefined' && gridEl && !gridEl.contains(canvas)) {
+        setTimeout(initMultiSelect, 200);
+        return;
+    }
+    _msInited = true;
 
-    // ---------- 鼠标 ----------
+    // ---------- 鼠标（捕获阶段，阻止 init.js 的 mousedown） ----------
     canvas.addEventListener('mousedown', e => {
         if (state.currentTool !== 'multiselect') return;
-        e.stopPropagation(); e.preventDefault();
+        e.stopImmediatePropagation();
+        e.preventDefault();
         const p = screenToGrid(e);
         _selBox = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
         requestRender();
@@ -16,6 +24,8 @@ function initMultiSelect() {
 
     canvas.addEventListener('mousemove', e => {
         if (!_selBox) return;
+        // 只在 multiselect 拖拽中才拦截，避免影响正常 hover
+        e.stopImmediatePropagation();
         const p = screenToGrid(e);
         _selBox.x1 = p.x; _selBox.y1 = p.y;
         requestRender();
@@ -23,6 +33,7 @@ function initMultiSelect() {
 
     window.addEventListener('mouseup', e => {
         if (!_selBox) return;
+        e.stopImmediatePropagation();
         applySelectionFromBox();
         _selBox = null;
         requestRender();
@@ -32,6 +43,7 @@ function initMultiSelect() {
     // ---------- 触摸 ----------
     canvas.addEventListener('touchstart', e => {
         if (state.currentTool !== 'multiselect') return;
+        e.stopImmediatePropagation();
         e.preventDefault();
         const t = e.touches[0];
         const p = screenToGrid({ clientX: t.clientX, clientY: t.clientY });
@@ -41,6 +53,7 @@ function initMultiSelect() {
 
     canvas.addEventListener('touchmove', e => {
         if (!_selBox) return;
+        e.stopImmediatePropagation();
         e.preventDefault();
         const t = e.touches[0];
         const p = screenToGrid({ clientX: t.clientX, clientY: t.clientY });
@@ -50,6 +63,7 @@ function initMultiSelect() {
 
     canvas.addEventListener('touchend', e => {
         if (!_selBox) return;
+        e.stopImmediatePropagation();
         e.preventDefault();
         applySelectionFromBox();
         _selBox = null;
@@ -58,10 +72,13 @@ function initMultiSelect() {
     }, { capture: true });
 }
 
+// ★ 坐标换算与 init.js 的 processClickAt 保持一致
 function screenToGrid(e) {
     const rect = canvas.getBoundingClientRect();
-    const sx = canvas.width / rect.width;
-    const sy = canvas.height / rect.height;
+    const lw = (typeof _logicalW !== 'undefined' && _logicalW) ? _logicalW : canvas.width;
+    const lh = (typeof _logicalH !== 'undefined' && _logicalH) ? _logicalH : canvas.height;
+    const sx = lw / rect.width;
+    const sy = lh / rect.height;
     const mx = (e.clientX - rect.left) * sx;
     const my = (e.clientY - rect.top) * sy;
     const gx = Math.floor((mx - PADDING) / PIXEL_SIZE);
@@ -77,12 +94,10 @@ function applySelectionFromBox() {
     const y1 = Math.max(_selBox.y0, _selBox.y1);
     const z = state.currentLayer;
 
-    // ★ 无论框里有没有东西，都记下这次框选矩形
     state._lastSelectionBox = {
         minX: x0, minY: y0, minZ: z,
         maxX: x1, maxY: y1, maxZ: z
     };
-    // ★ 同步到粘贴输入框，用户能看到当前目标位置
     requestAnimationFrame(() => {
         const ix = document.getElementById('batchPasteX');
         const iy = document.getElementById('batchPasteY');
@@ -119,7 +134,6 @@ function applySelectionFromBox() {
                 hasSomething = true;
             });
 
-            // ★ 空格子
             if (includeEmpty && !hasSomething) {
                 const key = `empty:${x},${y},${z}`;
                 if (!seen.has(key)) {
@@ -146,7 +160,6 @@ function applySelectionFromBox() {
 function showSelectionPanel() {
     const pc = document.getElementById('panelContent');
     if (!pc) return;
-    // ★ 只统计实际元素（empty 不算）
     const elementSel = state.multiSelection.filter(it => it.type !== 'empty');
     const n = elementSel.length;
     const emptyN = state.multiSelection.length - n;
@@ -156,7 +169,6 @@ function showSelectionPanel() {
         return;
     }
 
-    // 判断 uniform 时也只用实际元素
     const realTypes = new Set(elementSel.map(it => it.type));
     const uniform = realTypes.size === 1 ? [...realTypes][0] : null;
 
@@ -168,9 +180,9 @@ function showSelectionPanel() {
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
             <span class="color-dot" style="background:#ffd700;"></span>
             <strong>多选：${n} 个</strong>
-            ${emptyN > 0 ? `<span style="font-size:11px;color:#5a7a9a;">(含 ${emptyN} 空格)</span>` : ''}
+            ${emptyN > 0 ? `<span style="font-size:11px;color:var(--text-dim);">(含 ${emptyN} 空格)</span>` : ''}
         </div>
-        <div style="font-size:11px; color:#8aaccc; margin-bottom:8px;">${summary || (emptyN > 0 ? '（仅空格）' : '')}</div>
+        <div style="font-size:11px; color:var(--text-dim); margin-bottom:8px;">${summary || (emptyN > 0 ? '（仅空格）' : '')}</div>
 
         <div class="prop-row">
             <button class="add-btn" onclick="batchShiftSelection(1,0,0)">X+1</button>
@@ -207,7 +219,6 @@ function showSelectionPanel() {
         html += renderBatchPropsForType(uniform);
     }
 
-    // ---- 复制粘贴（与 QuickFill 结合） ----
     const clipInfo = (window.QuickFill && window.QuickFill.getClipboardInfo)
         ? window.QuickFill.getClipboardInfo()
         : null;
@@ -222,7 +233,6 @@ function showSelectionPanel() {
         <div class="sub-elem-section">
             <div class="sub-title">复制 / 粘贴</div>
             <div class="prop-row">
-                <!-- 统一换成 btn-sm，去掉 add-btn -->
                 <button class="btn-sm" onclick="batchCopyToClipboard()">📄 复制选区</button>
             </div>
             <div class="prop-row">
@@ -232,7 +242,6 @@ function showSelectionPanel() {
                 <input type="number" id="batchPasteZ" placeholder="Z" style="width:50px;">
                 <button class="btn-sm" onclick="batchPasteAtInput()">📥 粘贴</button>
             </div>
-            <!-- 颜色改为 var(--text-dim) 适配深浅主题 -->
             <label style="display:block;margin:8px 0 4px 0;color:var(--text-dim);font-size:12px;">
                 <input type="checkbox" id="batchPasteOverwrite"
                     onchange="window.QuickFill && window.QuickFill.setOverwrite && window.QuickFill.setOverwrite(this.checked)"
@@ -245,15 +254,15 @@ function showSelectionPanel() {
 
     html += `
         <div class="prop-row" style="margin-top:12px; gap:8px;">
-            <!-- 换成标准的危险按钮类 btn-danger，会自动变成红字红边框，悬停变红底白字 -->
             <button class="btn-sm btn-danger" onclick="batchDeleteSelection()">删除选中</button>
             <button class="btn-sm" onclick="clearMultiSelection()">取消选择</button>
         </div>
     `;
-    
-    // 初始化"原点"输入框为当前选区左上角
-    (function initOriginInputs(html) {
-        // 这里用 setTimeout 是因为要等 pc.innerHTML 生效后才能 getElementById
+
+    pc.innerHTML = html;
+
+    // 初始化"原点"输入框
+    (function initOriginInputs() {
         setTimeout(() => {
             const b = getSelectionBounds();
             if (!b) return;
@@ -266,8 +275,6 @@ function showSelectionPanel() {
         }, 0);
     })();
 
-    pc.innerHTML = html;
-    // 更新剪贴板状态
     const info = document.getElementById('batchClipInfo');
     if (info && window.QuickFill && window.QuickFill.getClipboardInfo) {
         const c = window.QuickFill.getClipboardInfo();
@@ -282,20 +289,14 @@ function renderBatchPropsForType(type) {
             { key: 'loopStartIndex', label: '循环索引', type: 'int' },
             { key: 'fullBlock', label: '完整方块', type: 'bool' },
         ],
-        falling: [
-            { key: 'floatTime', label: '掉落延迟', type: 'int' },
-        ],
-        prism: [
-            { key: 'energy', label: 'Energy', type: 'int' },
-        ],
+        falling: [{ key: 'floatTime', label: '掉落延迟', type: 'int' }],
+        prism: [{ key: 'energy', label: 'Energy', type: 'int' }],
         resizer: [
             { key: 'visible', label: '可见', type: 'bool' },
             { key: 'radiusX', label: '半径X', type: 'int' },
             { key: 'radiusY', label: '半径Y', type: 'int' },
         ],
-        bumper: [
-            { key: 'enabled', label: '启用', type: 'bool' },
-        ],
+        bumper: [{ key: 'enabled', label: '启用', type: 'bool' }],
         checkpoint: [
             { key: 'respawnZ', label: '重生Z', type: 'int' },
             { key: 'radiusX', label: '半径X', type: 'int' },
@@ -327,15 +328,15 @@ function renderBatchPropsForType(type) {
 
     let html = `<div class="sub-elem-section"><div class="sub-title">批量修改属性（${type}）</div>`;
     props.forEach(p => {
-        html += `<div class="prop-row"><label for="">${p.label}</label>`;
+        html += `<div class="prop-row"><label>${p.label}</label>`;
         if (p.type === 'bool') {
-            html += `<select name="select" onchange="if(this.value!=='') batchSetProp('${type}','${p.key}',this.value==='true')">
+            html += `<select onchange="if(this.value!=='') batchSetProp('${type}','${p.key}',this.value==='true')">
                 <option value="">不变</option>
                 <option value="true">是</option>
                 <option value="false">否</option>
             </select>`;
         } else if (p.type === 'int') {
-            html += `<input name="input" type="number" placeholder="留空不变"
+            html += `<input type="number" placeholder="留空不变"
                 onchange="if(this.value!=='') batchSetProp('${type}','${p.key}',parseInt(this.value))">`;
         } else if (p.type === 'tri') {
             html += `<select onchange="if(this.value!=='') batchSetProp('${type}','${p.key}', this.value==='__nul' ? null : (this.value==='true'))">
@@ -356,15 +357,26 @@ function renderBatchPropsForType(type) {
     return html;
 }
 
+// ==================== 批量属性修改（带撤销） ====================
 window.batchSetProp = function (type, key, value) {
     let n = 0;
-    state.multiSelection.forEach(it => {
-        if (it.type !== type) return;
-        const elem = findElementByTypeAndId(type, it.id);
-        if (!elem) return;
-        elem[key] = value;
-        n++;
-    });
+    const prevSuppressUI = state._suppressUI;
+    state._suppressUI = true;
+    state._sessionMarker = state._undoStack ? state._undoStack.length : 0;
+    try {
+        state.multiSelection.forEach(it => {
+            if (it.type !== type) return;
+            const elem = findElementByTypeAndId(type, it.id);
+            if (!elem) return;
+            const before = _cloneDeep(elem);
+            elem[key] = value;
+            _recordSet(type, elem, before);
+            n++;
+        });
+    } finally {
+        state._suppressUI = prevSuppressUI;
+    }
+    _flushSessionUndo();
     uniInterface();
     requestRender();
     updatePanel();
@@ -374,61 +386,48 @@ window.batchSetProp = function (type, key, value) {
 
 function findElementByTypeAndId(type, id) {
     const map = {
-        moving: state.movingPlatforms,
-        falling: state.fallingPlatforms,
-        prism: state.prisms,
-        resizer: state.resizers,
-        bumper: state.bumpers,
-        checkpoint: state.checkpoints,
-        cameratrigger: state.cameraTriggers,
-        button: state.buttons,
-        othercube: state.otherCubes,
-        darkcube: state.darkCubes,
+        moving: state.movingPlatforms, falling: state.fallingPlatforms,
+        prism: state.prisms, resizer: state.resizers, bumper: state.bumpers,
+        checkpoint: state.checkpoints, cameratrigger: state.cameraTriggers,
+        button: state.buttons, othercube: state.otherCubes, darkcube: state.darkCubes,
     };
     return (map[type] || []).find(e => e.id === id);
 }
 
-// ---------- 批量操作 API ----------
+// ==================== 批量删除（一次撤销） ====================
 window.batchDeleteSelection = function () {
     const realCount = state.multiSelection.filter(it => it.type !== 'empty').length;
     if (!realCount) { showToast('没有可删除的元素（选区内只有空格）'); return; }
     if (!confirm(`确定删除 ${realCount} 个元素？`)) return;
 
-    // ★ 关键：整个批量操作只记一次 undo
-    const beforeSnap = _serializeHistory();
     const prevSuppressUI = state._suppressUI;
-    const prevSuppressUndo = state._suppressUndo;
     state._suppressUI = true;
-    state._suppressUndo = true;
+    state._sessionMarker = state._undoStack ? state._undoStack.length : 0;
 
     try {
         const list = state.multiSelection.slice();
         list.forEach(it => {
             if (it.type === 'static') {
                 const c = it.coord;
-                const l = state.staticBlocks[c.z];
-                if (l && l[c.y]) l[c.y][c.x] = null;
+                const layer = state.staticBlocks[c.z];
+                if (layer && layer[c.y] && layer[c.y][c.x]) {
+                    const before = { ...layer[c.y][c.x] };
+                    layer[c.y][c.x] = null;
+                    _recordStep({ kind: 'static', x: c.x, y: c.y, z: c.z, before, after: null });
+                    _markDirty(`layer_${c.z}`);
+                    _adjustStaticCount(c.z, -1);
+                }
             } else if (it.type === 'empty') {
-                // 空坐标无需删除
+                // 无需删除
             } else {
-                deleteElement(it.type, it.id);   // 内部多次 saveCache/uniInterface，都被 suppress 拦下
+                deleteElement(it.type, it.id);   // 内部会 _recordRemove / _recordSet
             }
         });
     } finally {
         state._suppressUI = prevSuppressUI;
-        state._suppressUndo = prevSuppressUndo;
     }
 
-    // 手动一次性 push undo
-    const afterSnap = _serializeHistory();
-    if (beforeSnap !== afterSnap) {
-        state._undoStack = state._undoStack || [];
-        state._redoStack = state._redoStack || [];
-        state._undoStack.push(beforeSnap);
-        while (state._undoStack.length > 50) state._undoStack.shift();
-        state._redoStack.length = 0;
-    }
-    state._lastSavedSnapshot = _serializeHistory();
+    _flushSessionUndo();   // 合并成一条 batch
 
     state.multiSelection = [];
     rebuildSpatialIndex();
@@ -440,16 +439,15 @@ window.batchDeleteSelection = function () {
     showToast(`已删除 ${realCount} 个元素`);
 };
 
+// ==================== 批量平移（一次撤销） ====================
 window.batchShiftSelection = function (dx, dy, dz) {
     if (!state.multiSelection.length) return;
 
-    const beforeSnap = _serializeHistory();
-    const prevSuppressUI = state._suppressUI;
-    const prevSuppressUndo = state._suppressUndo;
-    state._suppressUI = true;
-    state._suppressUndo = true;
-
     const { w, l, h } = state.level.size;
+    const prevSuppressUI = state._suppressUI;
+    state._suppressUI = true;
+    state._sessionMarker = state._undoStack ? state._undoStack.length : 0;
+
     let newSel = [];
     try {
         state.multiSelection.forEach(it => {
@@ -457,18 +455,31 @@ window.batchShiftSelection = function (dx, dy, dz) {
                 const c = it.coord;
                 const nz = c.z + dz, ny = c.y + dy, nx = c.x + dx;
                 if (nx < 0 || nx >= w || ny < 0 || ny >= l || nz < 0 || nz >= h) {
-                    newSel.push(it);   // 越界保持原样
+                    newSel.push(it);
                     return;
                 }
                 const srcLayer = state.staticBlocks[c.z];
                 const block = srcLayer && srcLayer[c.y] && srcLayer[c.y][c.x];
                 if (!block) { newSel.push(it); return; }
+
+                // 源格 → null
+                const beforeSrc = { ...block };
                 srcLayer[c.y][c.x] = null;
+                _recordStep({ kind: 'static', x: c.x, y: c.y, z: c.z, before: beforeSrc, after: null });
+                _markDirty(`layer_${c.z}`);
+                _adjustStaticCount(c.z, -1);
+
+                // 目标格 ← block
                 const dstLayer = state.staticBlocks[nz];
-                if (dstLayer && dstLayer[ny]) dstLayer[ny][nx] = block;
+                if (dstLayer && dstLayer[ny]) {
+                    const beforeDst = dstLayer[ny][nx] ? { ...dstLayer[ny][nx] } : null;
+                    dstLayer[ny][nx] = { ...block };
+                    _recordStep({ kind: 'static', x: nx, y: ny, z: nz, before: beforeDst, after: { ...block } });
+                    _markDirty(`layer_${nz}`);
+                    if (!beforeDst) _adjustStaticCount(nz, 1);   // ★ 目标格原本为空才 +1
+                }
                 newSel.push({ type: 'static', coord: { x: nx, y: ny, z: nz } });
             } else {
-                // 各类元素的坐标平移
                 const p = getElementCoord(it.type, it.id);
                 if (!p) { newSel.push(it); return; }
                 const nx = p.x + dx, ny = p.y + dy, nz = p.z + dz;
@@ -476,7 +487,9 @@ window.batchShiftSelection = function (dx, dy, dz) {
                     case 'moving': {
                         const m = state.movingPlatforms.find(x => x.id === it.id);
                         if (m && m.waypoints) {
+                            const before = _cloneDeep(m);
                             m.waypoints.forEach(wp => { wp.x += dx; wp.y += dy; wp.z += dz; });
+                            _recordSet('moving', m, before);
                         }
                         break;
                     }
@@ -488,22 +501,38 @@ window.batchShiftSelection = function (dx, dy, dz) {
                             cameratrigger: state.cameraTriggers, button: state.buttons
                         })[it.type];
                         const el = arr && arr.find(x => x.id === it.id);
-                        if (el) { el.x = nx; el.y = ny; el.z = nz; }
+                        if (el) {
+                            const before = _cloneDeep(el);
+                            el.x = nx; el.y = ny; el.z = nz;
+                            _recordSet(it.type, el, before);
+                        }
                         break;
                     }
                     case 'resizer': {
                         const el = state.resizers.find(x => x.id === it.id);
-                        if (el) { el.x = nx; el.y = ny; el.z = nz; }
+                        if (el) {
+                            const before = _cloneDeep(el);
+                            el.x = nx; el.y = ny; el.z = nz;
+                            _recordSet('resizer', el, before);
+                        }
                         break;
                     }
                     case 'othercube': {
                         const el = state.otherCubes.find(x => x.id === it.id);
-                        if (el) { el.triggerX += dx; el.triggerY += dy; el.triggerZ += dz; }
+                        if (el) {
+                            const before = _cloneDeep(el);
+                            el.triggerX += dx; el.triggerY += dy; el.triggerZ += dz;
+                            _recordSet('othercube', el, before);
+                        }
                         break;
                     }
                     case 'darkcube': {
                         const el = state.darkCubes.find(x => x.id === it.id);
-                        if (el) { el.triggerX += dx; el.triggerY += dy; el.triggerZ += dz; }
+                        if (el) {
+                            const before = _cloneDeep(el);
+                            el.triggerX += dx; el.triggerY += dy; el.triggerZ += dz;
+                            _recordSet('darkcube', el, before);
+                        }
                         break;
                     }
                 }
@@ -512,18 +541,9 @@ window.batchShiftSelection = function (dx, dy, dz) {
         });
     } finally {
         state._suppressUI = prevSuppressUI;
-        state._suppressUndo = prevSuppressUndo;
     }
 
-    const afterSnap = _serializeHistory();
-    if (beforeSnap !== afterSnap) {
-        state._undoStack = state._undoStack || [];
-        state._redoStack = state._redoStack || [];
-        state._undoStack.push(beforeSnap);
-        while (state._undoStack.length > 50) state._undoStack.shift();
-        state._redoStack.length = 0;
-    }
-    state._lastSavedSnapshot = _serializeHistory();
+    _flushSessionUndo();
 
     state.multiSelection = newSel;
     rebuildSpatialIndex();
@@ -556,24 +576,33 @@ window.batchMoveSelectionOrigin = function () {
         showToast('原点已在目标位置');
         return;
     }
-
-    // 走一次 batchShiftSelection，它会重算 newSel 并刷新 showSelectionPanel
-    // 但问题是：多选面板会被 showSelectionPanel 重建，输入框会重设为新的左上角。
-    // 所以这里偏移后，输入框自动变成目标值，用户可继续操作。
     window.batchShiftSelection(dx, dy, dz);
 };
 
+// ==================== 批量改色（一次撤销） ====================
 window.batchSetStaticRGB = function (r, g, b) {
     let n = 0;
-    state.multiSelection.forEach(it => {
-        if (it.type !== 'static') return;
-        const c = it.coord;
-        const l = state.staticBlocks[c.z];
-        if (l && l[c.y] && l[c.y][c.x]) {
-            l[c.y][c.x] = { r, g, b };
-            n++;
-        }
-    });
+    const prevSuppressUI = state._suppressUI;
+    state._suppressUI = true;
+    state._sessionMarker = state._undoStack ? state._undoStack.length : 0;
+    try {
+        state.multiSelection.forEach(it => {
+            if (it.type !== 'static') return;
+            const c = it.coord;
+            const layer = state.staticBlocks[c.z];
+            if (layer && layer[c.y] && layer[c.y][c.x]) {
+                const before = { ...layer[c.y][c.x] };
+                const after = { r, g, b };
+                layer[c.y][c.x] = after;
+                _recordStep({ kind: 'static', x: c.x, y: c.y, z: c.z, before, after: { ...after } });
+                _markDirty(`layer_${c.z}`);
+                n++;
+            }
+        });
+    } finally {
+        state._suppressUI = prevSuppressUI;
+    }
+    _flushSessionUndo();
     requestRender();
     updateStatus();
     uniInterface();
@@ -587,14 +616,10 @@ window.clearMultiSelection = function () {
     updatePanel();
 };
 
-// ---------- 复制 / 粘贴入口 ----------
-
-// 计算多选选区的边界
+// ==================== 复制 / 粘贴入口 ====================
 function getSelectionBounds() {
-    // ★ 优先用"最近一次框选的矩形"
     if (state._lastSelectionBox) return state._lastSelectionBox;
 
-    // 保底：从 multiSelection 算
     if (!state.multiSelection.length) return null;
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -614,7 +639,6 @@ function getSelectionBounds() {
     return { minX, minY, minZ, maxX, maxY, maxZ };
 }
 
-// ★ 用选区左上角作为粘贴目标
 window.batchSetPasteTargetFromSelection = function () {
     const b = getSelectionBounds();
     if (!b) { showToast('请先选中至少一个元素'); return; }
@@ -622,7 +646,6 @@ window.batchSetPasteTargetFromSelection = function () {
         showToast('QuickFill 未加载'); return;
     }
     window.QuickFill.setPasteCoord(b.minX, b.minY, b.minZ);
-    // 顺便把坐标回填到面板输入框，便于用户微调
     const ix = document.getElementById('batchPasteX');
     const iy = document.getElementById('batchPasteY');
     const iz = document.getElementById('batchPasteZ');
@@ -632,7 +655,6 @@ window.batchSetPasteTargetFromSelection = function () {
     showToast(`粘贴目标已设为 (${b.minX},${b.minY},${b.minZ})`);
 };
 
-// 复制选区到剪贴板
 window.batchCopyToClipboard = function () {
     if (!state.multiSelection.length) { showToast('未选中任何元素'); return; }
     if (!window.QuickFill || !window.QuickFill.setCopyBox || !window.QuickFill.doCopy) {
@@ -644,10 +666,6 @@ window.batchCopyToClipboard = function () {
     window.QuickFill.setCopyBox(b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ);
     window.QuickFill.doCopy();
 
-    /*//复制后清空框选与输入框，防止误粘回原位
-    state._lastSelectionBox = null;
-    state.multiSelection = [];*/
-
     const ix = document.getElementById('batchPasteX');
     const iy = document.getElementById('batchPasteY');
     const iz = document.getElementById('batchPasteZ');
@@ -655,9 +673,8 @@ window.batchCopyToClipboard = function () {
     if (iy) iy.value = '';
     if (iz) iz.value = '';
 
-    // 清掉 quickfill 里的 pasteCoord，防止用旧值
     if (window.QuickFill.setPasteCoord) {
-        window.QuickFill.setPasteCoord(0, 0, 0);   // 会被下一步覆盖
+        window.QuickFill.setPasteCoord(0, 0, 0);
     }
 
     requestRender();
@@ -665,7 +682,6 @@ window.batchCopyToClipboard = function () {
     showToast('已复制。请框选目标区域后点「📥 粘贴」');
 };
 
-// 从输入框读目标坐标并粘贴
 window.batchPasteAtInput = function () {
     if (!window.QuickFill || !window.QuickFill.setPasteCoord || !window.QuickFill.doPaste) {
         showToast('QuickFill 未加载'); return;
@@ -675,14 +691,12 @@ window.batchPasteAtInput = function () {
     const yEl = document.getElementById('batchPasteY');
     const zEl = document.getElementById('batchPasteZ');
 
-    // ★ 优先输入框（applySelectionFromBox 会同步进去）
     let x = parseInt(xEl?.value);
     let y = parseInt(yEl?.value);
     let z = parseInt(zEl?.value);
     let source = '输入框';
 
     if (isNaN(x) || isNaN(y) || isNaN(z)) {
-        // 回退到最近框选（且必须与当前层一致）
         const b = state._lastSelectionBox;
         if (b && b.minZ === state.currentLayer) {
             x = b.minX; y = b.minY; z = b.minZ;
@@ -701,3 +715,10 @@ window.batchPasteAtInput = function () {
     window.QuickFill.doPaste();
     showSelectionPanel();
 };
+
+// ==================== 自启动 ====================
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(initMultiSelect, 500));
+} else {
+    setTimeout(initMultiSelect, 500);
+}

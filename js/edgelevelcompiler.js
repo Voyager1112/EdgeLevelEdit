@@ -388,6 +388,12 @@ function generateESOFromPngs(xmlDoc, pngs, theme, internalFileName, layeredMode)
         return blocks3d[x][y][z] >= 1;
     }
 
+    // 读取任意格的高度，越界返回 -1
+    function heightAt(x, y, z) {
+        if (x < 0 || x >= W || y < 0 || y >= L || z < 0 || z >= H) return -1;
+        return blocks3d[x][y][z];
+    }
+
     for (let z = 0; z < H; z++) {
         const png = pngs[z];
         if (!png) continue;
@@ -455,102 +461,6 @@ function generateESOFromPngs(xmlDoc, pngs, theme, internalFileName, layeredMode)
     const baseY_bottom = -mainTranslate.y / mainScale;
     const baseZ = (-L - mainTranslate.z) / mainScale;
     
-    /*for (let themeIdx = 0; themeIdx < 4; themeIdx++) {
-        const blocks = blocksByTheme[themeIdx];
-        if (blocks.length === 0) continue;
-        const actualTheme = themeOrder[themeIdx];
-        const cfg = THEME_CONFIG[actualTheme];
-        if (!cfg) continue;
-
-        //const { translate, scale } = cfg;
-        //const baseX = -translate.x / scale;
-        //const baseY_bottom = -translate.y / scale;
-        //const baseZ = (-L - translate.z) / scale;
-
-        const triangles = [];
-        for (const b of blocks) {
-            const { x, y, z, heightFrac } = b;
-            const hasTop = isFullBlock(x, y, z + 1);
-            const hasEast = isFullBlock(x + 1, y, z);
-            const hasSouth = isFullBlock(x, y + 1, z);
-            const isExitArea = exitPoint && (z === exitPoint.z - 1) &&
-                Math.abs(x - exitPoint.x) <= 1 && Math.abs(y - exitPoint.y) <= 1;
-
-            const x0 = baseX + x * step;
-            const x1 = baseX + (x + 1) * step;
-            const yFullBottom = baseY_bottom + z * step;          // 整格底部
-            const yFullTop = baseY_bottom + (z + 1) * step;       // 整格顶部
-            const yTop = yFullTop;
-            const yBottom = yFullTop - step * heightFrac;         // B 通道缩放整格高度
-            const z0 = baseZ + y * step;
-            const z1 = baseZ + (y + 1) * step;
-
-            globalMinX = Math.min(globalMinX, x0, x1);
-            globalMaxX = Math.max(globalMaxX, x0, x1);
-            globalMinY = Math.min(globalMinY, yFullBottom, yFullTop);
-            globalMaxY = Math.max(globalMaxY, yFullBottom, yFullTop);
-            globalMinZ = Math.min(globalMinZ, z0, z1);
-            globalMaxZ = Math.max(globalMaxZ, z0, z1);
-
-            const isEven = ((x + y) % 2 === 0);
-
-            // 顶面
-            if (!hasTop && !isExitArea) {
-                const dV = layerVOffset(z);
-                const v0 = V_TOP_FACE_A + dV;
-                const v1 = V_TOP_FACE_B + dV;
-                let u0, u1;
-                if (isEven) { u0 = 0.51; u1 = 0.74; }
-                else { u0 = 0.76; u1 = 0.99; }
-
-                const pA = `${x0},${yTop},${z0}`;
-                const pB = `${x1},${yTop},${z0}`;
-                const pC = `${x0},${yTop},${z1}`;
-                const pD = `${x1},${yTop},${z1}`;
-                const n = '0,1,0';
-
-                // 三角形 A-B-C（原版顺序）
-                triangles.push(`    <Triangle>\n      <Vertex Position="${pA}" Normal="${n}" TexCoord="${u0},${v0}" />\n      <Vertex Position="${pB}" Normal="${n}" TexCoord="${u1},${v0}" />\n      <Vertex Position="${pC}" Normal="${n}" TexCoord="${u0},${v1}" />\n    </Triangle>`);
-                // 三角形 C-B-D（原版顺序）
-                triangles.push(`    <Triangle>\n      <Vertex Position="${pC}" Normal="${n}" TexCoord="${u0},${v1}" />\n      <Vertex Position="${pB}" Normal="${n}" TexCoord="${u1},${v0}" />\n      <Vertex Position="${pD}" Normal="${n}" TexCoord="${u1},${v1}" />\n    </Triangle>`);
-            }
-
-            // 东面
-            if (!hasEast) {
-                const vTop = layeredMode ? sideV(yTop) : V_SIDE_TOP;
-                const vBot = layeredMode ? sideV(yBottom) : V_SIDE_BOTTOM;
-                const p1 = `${x1},${yBottom},${z0}`;
-                const p2 = `${x1},${yBottom},${z1}`;
-                const p3 = `${x1},${yTop},${z1}`;
-                const p4 = `${x1},${yTop},${z0}`;
-                const n = '1,0,0';
-                triangles.push(`    <Triangle>\n      <Vertex Position="${p1}" Normal="${n}" TexCoord="0.49,${vBot}" />\n      <Vertex Position="${p2}" Normal="${n}" TexCoord="0.26,${vBot}" />\n      <Vertex Position="${p4}" Normal="${n}" TexCoord="0.26,${vTop}" />\n    </Triangle>`);
-                triangles.push(`    <Triangle>\n      <Vertex Position="${p2}" Normal="${n}" TexCoord="0.49,${vBot}" />\n      <Vertex Position="${p3}" Normal="${n}" TexCoord="0.26,${vTop}" />\n      <Vertex Position="${p4}" Normal="${n}" TexCoord="0.49,${vTop}" />\n    </Triangle>`);
-            }
-
-            // 南面
-            if (!hasSouth) {
-                const vTop = layeredMode ? sideV(yTop) : V_SIDE_TOP;
-                const vBot = layeredMode ? sideV(yBottom) : V_SIDE_BOTTOM;
-
-                const pA = `${x0},${yBottom},${z1}`;
-                const pB = `${x0},${yTop},${z1}`;
-                const pC = `${x1},${yBottom},${z1}`;
-                const pD = `${x1},${yTop},${z1}`;
-                const n = '0,0,1';
-
-                // 三角形 A-B-C（原版顺序）
-                triangles.push(`    <Triangle>\n      <Vertex Position="${pA}" Normal="${n}" TexCoord="0.01,${vBot}" />\n      <Vertex Position="${pB}" Normal="${n}" TexCoord="0.01,${vTop}" />\n      <Vertex Position="${pC}" Normal="${n}" TexCoord="0.24,${vBot}" />\n    </Triangle>`);
-                // 三角形 B-D-C（原版顺序）
-                triangles.push(`    <Triangle>\n      <Vertex Position="${pB}" Normal="${n}" TexCoord="0.01,${vTop}" />\n      <Vertex Position="${pD}" Normal="${n}" TexCoord="0.24,${vTop}" />\n      <Vertex Position="${pC}" Normal="${n}" TexCoord="0.24,${vBot}" />\n    </Triangle>`);
-            }
-        }
-
-        if (triangles.length > 0) {
-            modelsXml.push(`  <Model MaterialAsset="${cfg.material}">\n${triangles.join('\n')}\n  </Model>`);
-        }
-    }*/
-    
     const MAX_TRIS_PER_MODEL = 20000;   // 60000 顶点，安全上限
     /*如果还是卡/内存爆：说明 4 个主题循环里 triangles.join() 累计字符串太大。可以把 MAX_TRIS_PER_MODEL 从 20000 降到 5000，模型数变多但每个字符串更小，缓解峰值内存。*/
     
@@ -570,9 +480,15 @@ function generateESOFromPngs(xmlDoc, pngs, theme, internalFileName, layeredMode)
 
         for (const b of blocks) {
             const { x, y, z, heightFrac } = b;
-            const hasTop = isFullBlock(x, y, z + 1);
+            /*const hasTop = isFullBlock(x, y, z + 1);
             const hasEast = isFullBlock(x + 1, y, z);
-            const hasSouth = isFullBlock(x, y + 1, z);
+            const hasSouth = isFullBlock(x, y + 1, z);*/
+            
+            const hasTop   = isFullBlock(x, y, z + 1);      // 顶面：上方满格才跳过（保留原逻辑）
+            const hSelf    = heightFrac;                     // 自身高度（循环里已有）
+            const hEast    = heightAt(x + 1, y, z);          // +X 相邻高度
+            const hSouth   = heightAt(x, y + 1, z);          // +Y 相邻高度
+            
             const isExitArea = exitPoint && (z === exitPoint.z - 1) &&
                 Math.abs(x - exitPoint.x) <= 1 && Math.abs(y - exitPoint.y) <= 1;
 
@@ -594,7 +510,7 @@ function generateESOFromPngs(xmlDoc, pngs, theme, internalFileName, layeredMode)
 
             const isEven = ((x + y) % 2 === 0);
 
-            // 顶面
+            // 顶面：上方满方块 且 不在 exit 区域 → 跳过
             if (!hasTop && !isExitArea) {
                 const dV = layerVOffset(z);
                 const v0 = V_TOP_FACE_A + dV;
@@ -613,8 +529,9 @@ function generateESOFromPngs(xmlDoc, pngs, theme, internalFileName, layeredMode)
                 triangles.push(`    <Triangle>\n      <Vertex Position="${pC}" Normal="${n}" TexCoord="${u0},${v1}" />\n      <Vertex Position="${pB}" Normal="${n}" TexCoord="${u1},${v0}" />\n      <Vertex Position="${pD}" Normal="${n}" TexCoord="${u1},${v1}" />\n    </Triangle>`);
             }
 
-            // 东面
-            if (!hasEast) {
+            // 东面：相邻高度 < 自身高度 → 侧面暴露 → 生成
+            //if (!hasEast) {
+            if (hSelf > 0 && hEast < hSelf) {
                 const vTop = layeredMode ? sideV(yTop) : V_SIDE_TOP;
                 const vBot = layeredMode ? sideV(yBottom) : V_SIDE_BOTTOM;
                 const p1 = `${x1},${yBottom},${z0}`;
@@ -627,9 +544,10 @@ function generateESOFromPngs(xmlDoc, pngs, theme, internalFileName, layeredMode)
                 //原来这几个Vertex的TexCoord第一项是0.49，0.26，0.26 0.49，0.26，0.49
             }
 
-            // 南面
-            if (!hasSouth) {
-                const vTop = layeredMode ? sideV(yTop) : V_SIDE_TOP;
+            // 南面：相邻高度 < 自身高度 → 侧面暴露 → 生成
+            //if (!hasSouth) {
+            if (hSelf > 0 && hSouth < hSelf) {
+            const vTop = layeredMode ? sideV(yTop) : V_SIDE_TOP;
                 const vBot = layeredMode ? sideV(yBottom) : V_SIDE_BOTTOM;
 
                 const pA = `${x0},${yBottom},${z1}`;
@@ -843,42 +761,6 @@ class EdgeCompiler {
 			L.appendChild(newEl);
 		}
 	}
-
-    // RelatedTo 递归解析
-    /*resolveRelatedTo(mp, mpData, resolving) {
-        if (mp._resolved) return mp._resolvedWaypoints;
-        if (resolving.has(mp)) {
-            this.logErr(`循环引用检测到: ${this.getAttr(mp.el, 'ID') || '(匿名)'}`);
-            mp._resolvedWaypoints = [];
-            mp._resolved = true;
-            return mp._resolvedWaypoints;
-        }
-        const related = this.getAttr(mp.el, 'RelatedTo');
-        if (!related) {
-            mp._resolvedWaypoints = mp.waypoints.slice();
-            mp._resolved = true;
-            return mp._resolvedWaypoints;
-        }
-        const target = mpData.find(m => this.getAttr(m.el, 'ID') === related);
-        if (!target) {
-            this.logErr(`RelatedTo 目标未找到: "${related}"`);
-            mp._resolvedWaypoints = [];
-            mp._resolved = true;
-            return mp._resolvedWaypoints;
-        }
-        resolving.add(mp);
-        const targetWps = this.resolveRelatedTo(target, mpData, resolving);
-        resolving.delete(mp);
-        const off = mp.offset || { x:0, y:0, z:0 };
-        mp._resolvedWaypoints = targetWps.map(w => ({
-            pos: { x: w.pos.x + off.x, y: w.pos.y + off.y, z: w.pos.z + off.z },
-            tt: w.tt,
-            pt: w.pt
-        }));
-        mp._resolved = true;
-        this.logInfo(`MP ${this.getAttr(mp.el, 'ID') || '?'} RelatedTo="${related}" → 复制 ${targetWps.length} 个路点 + 偏移`);
-        return mp._resolvedWaypoints;
-    }*/
 
 	// RelatedTo 递归解析（修改版）
 	resolveRelatedTo(mp, mpData, resolving) {

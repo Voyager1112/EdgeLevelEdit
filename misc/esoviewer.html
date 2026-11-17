@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>EDGE 模型与贴图查看器</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; color: white; font-family: sans-serif; display: flex; height: 100vh; }
+        #sidebar { width: 320px; background: #1e1e1e; border-right: 1px solid #333; display: flex; flex-direction: column; z-index: 10; }
+        #sidebar-header { padding: 15px; background: #252526; border-bottom: 1px solid #333; }
+        #drop-zone { border: 2px dashed #555; padding: 20px; text-align: center; cursor: pointer; border-radius: 5px; margin-top: 10px; color: #aaa; }
+        #drop-zone.dragover { background: rgba(255,255,255,0.1); border-color: #0078d7; color: white; }
+        #tree-container { flex: 1; overflow-y: auto; padding: 10px; font-size: 13px; }
+        .tree-node { margin: 4px 0; cursor: pointer; user-select: none; padding: 2px 0; }
+        .tree-node:hover { background: #2a2d2e; }
+        .tree-children { margin-left: 16px; border-left: 1px dotted #444; padding-left: 8px; display: none; }
+        .tree-children.open { display: block; }
+        .tree-icon { display: inline-block; width: 16px; text-align: center; margin-right: 4px; font-size: 10px; }
+        .material-panel { padding: 8px 6px; background: #2a2a2a; border-radius: 4px; margin: 4px 0 6px 0; display: flex; flex-direction: column; gap: 6px; }
+        .material-panel button { padding: 5px; font-size: 12px; }
+        .material-panel .preset-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+        .material-panel .preset-row button { padding: 6px 0; }
+        .material-panel .color-row { display: flex; gap: 4px; align-items: center; }
+        .material-panel input[type="color"] { flex: 1; height: 28px; padding: 0; border: none; cursor: pointer; }
+        .material-panel .clear-btn { background: #555; font-size: 11px; }
+        .material-panel .clear-btn:hover { background: #666; }
+        #controls { padding: 15px; background: #252526; border-top: 1px solid #333; display: flex; flex-direction: column; gap: 10px; }
+        .control-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+        button { padding: 8px; background: #0e639c; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #1177bb; }
+        button:disabled { background: #444; color: #888; cursor: not-allowed; }
+        #viewport { flex: 1; position: relative; }
+        #info { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; font-size: 12px; pointer-events: none; color: #ccc; }
+        input[type="file"] { display: none; }
+        #modal { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; justify-content: center; align-items: center; }
+        #modal-content { background: #2d2d2d; padding: 20px; border-radius: 8px; max-width: 600px; width: 80%; max-height: 80vh; overflow-y: auto; }
+        #xml-output { width: 100%; height: 300px; background: #111; color: #0f0; border: 1px solid #444; font-family: monospace; }
+    </style>
+
+    <script src="../js/online/three.min.js"></script>
+    <script src="../js/online/OrbitControls.js"></script>
+    <script>
+    //  预设贴图（base64）粘贴区：把你自己的 data:image/png;base64,... 粘到下面 4 个引号里
+    //  留空则该预设按钮自动禁用
+    const PRESET_TEXTURES = [
+        'data:image/png;base64,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', // 预设 0 —— 在此粘贴 base64
+        'data:image/png;base64,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', // 预设 1 —— 在此粘贴 base64
+        'data:image/png;base64,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', // 预设 2 —— 在此粘贴 base64
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAADTED8xAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAACxMAAAsTAQCanBgAAAsbSURBVHhe7d1ZUptZFkXhM4MinTa9ECDRCRCNEIge0fc47TQ2dlU+ZETWQ81/ADWANYATizgR3xDWVujh3vvH5fMvtfOHN7U/fv5P7fn1v2rBpFyYlAuTcmFSLnH59G+18/sfakzKhUm51ACSMSkXJuUSF8+/1Ib3b2pMyoVJucTF0y81/qa6MCkXJuVSA0jGpFyYlIt+AMP772pMyoVJudQAkjEpFyblEhdPP9WYlAuTcmFSLjWAZEzKhUm5xMXjT7Wzu+9qTMqFSbnUAJIxKRcm5eIfwP13NSblwqRcagDJmJQLk3KJ88c3tbO7VzUm5cKkXIIHdF3Obl/VmJQLk3KpASRjUi5MysX/FwhJuTApFyblUgNIxqRcmJRLDB/f1E5vX9WYlAuTconhw5sak3JhUi5MyiXO79/UTm+/qTEpFyblUgNIxqRcmJRLDB9+qDEpFyblwqRcagDJmJQLk3KJ4f0PtZPbb2pMyoVJuQSvaLic3PypxqRcmJRLDSAZk3JhUi7BA7ouJ7d/qjEpFyblUgNIxqRcmJRL8IS6y/HNVzUm5cKkXGoAyZiUC5NyCV7Tdjm5+arGpFyYlEsNIBmTcmFSLv6/QNdf1JiUC5NyqQEkY1IuTMoleDrF5ej6ixqTcmFSLnF6902NSbkwKRcm5VIDSMakXJiUi/8v0NUXNSblwqRcagDJmJQLk3IJnk5xObz6Q41JuTAplxpAMiblwqRc/AO4/KzGpFyYlEsNIBmTcmFSLjWAZEzKhUm51ACSMSkXJuUSPKHucnjxWY1JuTApF/0ADi5e1JiUC5NyqQEkY1IuTMqlBpCMSbkwKZcaQDIm5cKkXILnE132z5/VmJQLk3KpASRjUi5MyuUdDOBJjUm5MCmXGkAyJuXCpFyC5xNdmJQLk3JhUi41gGRMyoVJucTh1We1wfBJjUm5MCmX4PEsl73hoxqTcmFSLjWAZEzKhUm5xMHlZ7XB2aMak3JhUi41gGRMyoVJucTB5Yva3tmj2vPrP2oPX/5WqwEkY1IuTMol9i9e1PZOH9WYlAuTcqkBJGNSLkzKJXhC3WX39EGNSbkwKZfYv3hW658+qDEpFyblUgNIxqRcmJRL8HiWy+7JvRqTcmFSLjWAZEzKhUm5xP7wSa1/cqfGpFyYlEsNIBmTcmFSLjEYPqrtHN+pMSkXJuVSA0jGpFyYlMs7GMCtGpNyYVIuNYBkTMqFSbkE7yi5MCkXJuXCpFyCB3Rdekc3akzKhUm51ACSMSkXJuUSe2cPar3DGzUm5cKkXGoAyZiUC5NyCZ5Qd+kdXqsxKRcm5VIDSMakXJiUS/CEusv2wbUak3JhUi41gGRMyoVJuUT/5F5t6+BKjUm5MCmXGkAyJuXCpFxi5+ROjUm5MCkXJuXiH8D+pRqTcmFSLjWAZEzKhUm5BM8numzuX6oxKRcm5VIDSMakXJiUS/SObtU2BhdqTMqFSbnUAJIxKRcm5RK94xu1jcG5GpNyYVIuwSsaLkzKhUm5MCmX2D68UdvYO1djUi5MyqUGkIxJuTApl9g+ulbr7g3VmJQLk3KJ7cMrtfXdMzUm5cKkXGoAyZiUC5NyCV7RcFnvn6kxKRcm5VIDSMakXJiUS/CEuguTcmFSLkzKpQaQjEm5MCmX4PlEl7X+qRqTcmFSLjWAZEzKhUm5+Aewc6rGpFyYlEsNIBmTcmFSLrE5uFBb3TlRY1IuTMoleEDXZXXnWI1JuTAplxpAMiblwqRcort3rrbaO1ZjUi5MyqUGkIxJuTApl+AVDZfO9pEak3JhUi41gGRMyoVJuQTvKLmsbB+pMSkXJuVSA0jGpFyYlEt0d8/UVrYO1ZiUC5NyqQEkY1IuTMoluv1TNSblwqRcmJRLrPdP1Va2DtSYlAuTcgmeUHdhUi5MyoVJufgHsLmvxqRcmJSLfwAb+2pMyoVJuQRPqLusbAzUHr7+rXb78pdaDSAZk3JhUi76ASx3B2pMyoVJudQAkjEpFyblEjyh7rLUHagxKRcm5eIfwPqeGpNyYVIu72AAu2pMyoVJuQSvaLgsru+qMSkXJuVSA0jGpFyYlMs7GEBfjUm5MCmXGkAyJuXCpFyis3WotrC+q8akXJiUyzsYQF+NSbkwKZfgCXUXJuXCpFyYlEsNIBmTcmFSLv4BrPXVmJQLk3KJlc0DtfbqjhqTcmFSLjWAZEzKhUm5BG+purRXe2pMyoVJudQAkjEpFyblEsubA7VWp6fGpFyYlEssbwzUmJQLk3JhUi7BS3ou852eGpNyYVIuNYBkTMqFSbnEcndPbb6zrcakXJiUSw0gGZNyYVIuwVuqLvMrW2pMyoVJuQQv6bnMrWypMSkXJuVSA0jGpFyYlIt/AMubakzKhUm51ACSMSkXJuUSvKbtMru8qcakXJiUSw0gGZNyYVIu/gEsbagxKRcm5VIDSMakXJiUS/CWqktzaUONSbkwKZcaQDIm5cKkXKK91lebXeqqMSkXJuUS7bUdteZiV41JuTAplxpAMiblwqRcorW6o9ZcXFdjUi5MyqUGkIxJuTApl+BDHS4zC2tqTMqFSbnUAJIxKRcm5RKt1Z5ao72mxqRcmJRLDSAZk3JhUi7R6myrNdqrakzKhUm51ACSMSkXJuUSfKfApdFaVWNSLkzKJeY7W2rTrY4ak3JhUi41gGRMyoVJuQQf6nCZnu+oMSkXJuVSA0jGpFyYlEvMLW+pTc2vqDEpFyblUgNIxqRcmJRL8Kkml6m5FTUm5cKkXGoAyZiUC5NyCT7U4TI1v6zGpFyYlEsNIBmTcmFSLvoBTM4tqzEpFyblErOLXbWJ2SU1JuXCpFxqAMmYlAuTcgle03aZnF1UY1IuTMqlBpCMSbkwKZfgU00uE80ltZuX/6hdPf5UqwEkY1IuTMolmgvrauPNRTUm5cKkXGoAyZiUC5NyCT7V5DLeXFBjUi5MyqUGkIxJuTAplxpAMiblwqRcYqa9pjY201ZjUi5MyqUGkIxJuTApl+BbZS5MyoVJuTAplxpAMiblwqRcgo/1uYw1WmpMyoVJudQAkjEpFyblEnysz4VJuTApFyblUgNIxqRcmJRLNFodtdHGvBqTcmFSLsHXKl1Gp+fVmJQLk3KpASRjUi5MyiX4WqXLp6l5NSblwqRcagDJmJQLk3J5BwOYU2NSLkzKpQaQjEm5MCmX4GuVLh+n5tSYlAuTcqkBJGNSLkzKJfhcqwuTcmFSLkzKpQaQjEm5MCmXmJpbUvs4OafGpFyYlEtMzi2pfZycVWNSLkzK5R0MoKnGpFyYlEtMzi6p/T7ZVGNSLkzKpQaQjEm5MCmX4Iv1Lr9PNNWYlAuTcqkBJGNSLkzK5R0MYEaNSbkwKZcaQDIm5cKkXGKyuaj2YWJGjUm5MCmXmGguqjEpFyblwqRcYnx2Qe3D+Iwak3JhUi7BF+tdfhufUWNSLkzKpQaQjEm5MCmXGJ9ZUPsw1lBjUi5MyqUGkIxJuTApF/8AxhtqTMqFSbnUAJIxKRcm5RLjM22138am1ZiUC5NyqQEkY1IuTMqlBpCMSbkwKZcaQDIm5cKkXGKs0VYbGZtWY1IuTMolxhtttZGxKTUm5cKkXGoAyZiUC5NyCX62zWVkdFqNSbkwKZcaQDIm5cKkXGK00VIbGZ1SY1IuTMqlBpCMSbkwKZfgl2tdRj5NqTEpFyblUgNIxqRcmJRLjE631JiUC5NyYVIuNYBkTMqFSbkEv13u8q9PU2pMyoVJubyDAUyqMSkXJuVSA0jGpFyYlEsNIBmTcmFSLjWAZEzKhUm5/B/ETfxmcPuPUAAAAABJRU5ErkJggg==', // 预设 3 —— 在此粘贴 base64
+    ];
+
+    (function () {
+        function loadScript(src) {
+            return new Promise(function (resolve, reject) {
+                var s = document.createElement('script');
+                s.src = src;
+                s.onload = resolve;
+                s.onerror = function () { reject(new Error('加载失败: ' + src)); };
+                document.head.appendChild(s);
+            });
+        }
+        function whenDomReady(cb) {
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', cb);
+            else cb();
+        }
+        function whenThreeReady(cb) {
+            if (typeof THREE === 'undefined' || typeof THREE.OrbitControls === 'undefined') {
+                return setTimeout(function () { whenThreeReady(cb); }, 30);
+            }
+            cb();
+        }
+
+        whenDomReady(function () {
+            whenThreeReady(function () { main(); });
+        });
+
+        if (typeof THREE === 'undefined') {
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js')
+                .catch(function (e) { console.error(e); })
+                .then(function () {
+                    if (typeof THREE.OrbitControls === 'undefined') {
+                        return loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js');
+                    }
+                })
+                .catch(function (e) { console.error(e); });
+        } else if (typeof THREE.OrbitControls === 'undefined') {
+            loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js')
+                .catch(function (e) { console.error(e); });
+        }
+    })();
+
+    // ================= 主程序（全局 THREE） =================
+    function main() {
+
+        // ================= 状态管理 =================
+        let scene, camera, renderer, controls;
+        let currentObject = null;
+        let axesHelper = null;
+
+        const filePool = new Map();          // name -> { file, buffer, url }
+        let currentESOData = null;
+        const materialTextures = new Map();  // matHash -> THREE.Texture
+        const materialColors = new Map();    // matHash -> 0xRRGGBB
+        const materialNodes = new Map();     // matHash -> treeNode（用于更新状态）
+
+        // ================= 初始化 =================
+        function initThree() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+
+            camera = new THREE.PerspectiveCamera(
+                60,
+                document.getElementById('viewport').clientWidth / window.innerHeight,
+                0.1,
+                20000
+            );
+            camera.position.set(0, 50, 100);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(document.getElementById('viewport').clientWidth, window.innerHeight);
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            document.getElementById('viewport').appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+            axesHelper = new THREE.AxesHelper(50);
+            scene.add(axesHelper);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = document.getElementById('viewport').clientWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(document.getElementById('viewport').clientWidth, window.innerHeight);
+            });
+
+            let lastTime = performance.now();
+            let frames = 0;
+            (function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+                frames++;
+                const now = performance.now();
+                if (now - lastTime >= 1000) {
+                    document.getElementById('fps').innerText = frames;
+                    frames = 0;
+                    lastTime = now;
+                }
+            })();
+        }
+
+        // ================= ESO 解析器 =================
+        function parseESO(buffer) {
+            const view = new DataView(buffer);
+            let pos = 0;
+            const decoder = new TextDecoder();
+
+            pos += 8;
+            const origName = decoder.decode(new Uint8Array(buffer, pos, 64)).replace(/\0/g, ''); pos += 64;
+            pos += 64; // ns
+
+            const v01 = view.getInt32(pos, true); pos += 4;
+            const v02 = view.getInt32(pos, true); pos += 4;
+            const hash1 = view.getBigUint64(pos, true).toString(16).toUpperCase().padStart(16, '0'); pos += 8;
+            const hash2 = view.getBigUint64(pos, true).toString(16).toUpperCase().padStart(16, '0'); pos += 8;
+            const v07 = view.getInt32(pos, true); pos += 4;
+            const v08 = view.getInt32(pos, true); pos += 4;
+            const v09 = view.getInt32(pos, true); pos += 4;
+            const scaleXYZ = view.getFloat32(pos, true); pos += 4;
+
+            const translate = [view.getFloat32(pos, true), view.getFloat32(pos + 4, true), view.getFloat32(pos + 8, true)]; pos += 12;
+            const rotate    = [view.getFloat32(pos, true), view.getFloat32(pos + 4, true), view.getFloat32(pos + 8, true)]; pos += 12;
+            const scale     = [view.getFloat32(pos, true), view.getFloat32(pos + 4, true), view.getFloat32(pos + 8, true)]; pos += 12;
+
+            const v20 = view.getFloat32(pos, true); pos += 4;
+            const v21 = view.getInt32(pos, true); pos += 4;
+            const modelCount = view.getInt32(pos, true); pos += 4;
+
+            let bMin = [0, 0, 0], bMax = [0, 0, 0];
+            if (modelCount > 0) {
+                bMin = [view.getFloat32(pos, true), view.getFloat32(pos + 4, true), view.getFloat32(pos + 8, true)]; pos += 12;
+                bMax = [view.getFloat32(pos, true), view.getFloat32(pos + 4, true), view.getFloat32(pos + 8, true)]; pos += 12;
+            }
+
+            const models = [];
+            for (let m = 0; m < modelCount; m++) {
+                const matHash = view.getBigUint64(pos, true).toString(16).toUpperCase().padStart(16, '0'); pos += 8;
+                const flags = view.getUint32(pos, true); pos += 4;
+                const numVerts = view.getInt32(pos, true); pos += 4;
+                pos += 4; // numPolys
+                pos += 4;
+
+                const hasNormal = (flags & 1) !== 0;
+                const hasColor = (flags & 2) !== 0;
+                const hasTexCoord = (flags & 4) !== 0;
+                const hasTexCoord2 = (flags & 8) !== 0;
+
+                const positions = new Float32Array(numVerts * 3);
+                for (let i = 0; i < numVerts; i++) {
+                    positions[i * 3]     = view.getFloat32(pos, true);
+                    positions[i * 3 + 1] = view.getFloat32(pos + 4, true);
+                    positions[i * 3 + 2] = view.getFloat32(pos + 8, true);
+                    pos += 12;
+                }
+                let normals = null;
+                if (hasNormal) {
+                    normals = new Float32Array(numVerts * 3);
+                    for (let i = 0; i < numVerts; i++) {
+                        normals[i * 3]     = view.getFloat32(pos, true);
+                        normals[i * 3 + 1] = view.getFloat32(pos + 4, true);
+                        normals[i * 3 + 2] = view.getFloat32(pos + 8, true);
+                        pos += 12;
+                    }
+                }
+                let colors = null;
+                if (hasColor) {
+                    colors = new Float32Array(numVerts * 3);
+                    for (let i = 0; i < numVerts; i++) {
+                        const c = view.getUint32(pos, true); pos += 4;
+                        colors[i * 3]     = ((c >> 16) & 0xFF) / 255;
+                        colors[i * 3 + 1] = ((c >> 8) & 0xFF) / 255;
+                        colors[i * 3 + 2] = (c & 0xFF) / 255;
+                    }
+                }
+                let uvs = null;
+                if (hasTexCoord) {
+                    uvs = new Float32Array(numVerts * 2);
+                    for (let i = 0; i < numVerts; i++) {
+                        uvs[i * 2]     = view.getFloat32(pos, true);
+                        uvs[i * 2 + 1] = view.getFloat32(pos + 4, true);
+                        pos += 8;
+                    }
+                }
+                if (hasTexCoord2) pos += numVerts * 8;
+
+                const indices = new Uint16Array(numVerts);
+                for (let i = 0; i < numVerts; i++) {
+                    indices[i] = view.getUint16(pos, true); pos += 2;
+                }
+
+                models.push({ matHash, positions, normals, colors, uvs, indices });
+            }
+
+            return {
+                filename: origName, v01, v02, hash1, hash2, v07, v08, v09, scaleXYZ,
+                translate, rotate, scale, v20, v21, bMin, bMax, models
+            };
+        }
+
+        // ================= 渲染模型 =================
+        function renderESO(esoData) {
+            if (currentObject) {
+                scene.remove(currentObject);
+                currentObject.traverse((child) => {
+                    if (child.isMesh) child.geometry.dispose();
+                });
+            }
+
+            const group = new THREE.Group();
+            group.scale.set(
+                esoData.scale[0] * esoData.scaleXYZ,
+                esoData.scale[1] * esoData.scaleXYZ,
+                esoData.scale[2] * esoData.scaleXYZ
+            );
+            group.position.set(esoData.translate[0], esoData.translate[1], esoData.translate[2]);
+
+            let totalTris = 0;
+
+            esoData.models.forEach(model => {
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3));
+                if (model.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(model.normals, 3));
+                if (model.colors)  geometry.setAttribute('color', new THREE.BufferAttribute(model.colors, 3));
+                if (model.uvs)     geometry.setAttribute('uv', new THREE.BufferAttribute(model.uvs, 2));
+                geometry.setIndex(new THREE.BufferAttribute(model.indices, 1));
+
+                totalTris += model.indices.length / 3;
+
+                const mat = new THREE.MeshBasicMaterial({
+                    side: THREE.DoubleSide,
+                    wireframe: document.getElementById('wireframe').checked,
+                    vertexColors: !!model.colors
+                });
+
+                if (materialTextures.has(model.matHash)) {
+                    mat.map = materialTextures.get(model.matHash);
+                    mat.color.setHex(0xffffff);
+                    mat.vertexColors = false;
+                } else if (materialColors.has(model.matHash)) {
+                    mat.color.set(materialColors.get(model.matHash));
+                }
+
+                const mesh = new THREE.Mesh(geometry, mat);
+                mesh.userData.matHash = model.matHash;
+                group.add(mesh);
+            });
+
+            currentObject = group;
+            scene.add(group);
+            document.getElementById('tri-count').innerText = totalTris;
+
+            const box = new THREE.Box3().setFromObject(group);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+
+            camera.position.copy(center);
+            camera.position.z += maxDim * 1.5;
+            controls.target.copy(center);
+            controls.update();
+
+            document.getElementById('bbox-info').innerText =
+                `Min: ${box.min.x.toFixed(1)}, ${box.min.y.toFixed(1)}, ${box.min.z.toFixed(1)} | ` +
+                `Max: ${box.max.x.toFixed(1)}, ${box.max.y.toFixed(1)}, ${box.max.z.toFixed(1)}`;
+
+            buildTreeUI(esoData);
+            document.getElementById('btn-export-xml').disabled = false;
+            document.getElementById('btn-compile-eso').disabled = false;
+        }
+
+        // ================= 模型树 UI =================
+        function buildTreeUI(esoData) {
+            const container = document.getElementById('tree-container');
+            container.innerHTML = '';
+            materialNodes.clear();
+
+            const esoNode = createTreeNode(`📦 ${esoData.filename || 'model'}.eso`, true);
+            container.appendChild(esoNode.element);
+
+            const modelsGroup = new Map();
+            esoData.models.forEach(m => {
+                if (!modelsGroup.has(m.matHash)) modelsGroup.set(m.matHash, 0);
+                modelsGroup.set(m.matHash, modelsGroup.get(m.matHash) + (m.indices.length / 3));
+            });
+
+            modelsGroup.forEach((triCount, matHash) => {
+                const matNode = createTreeNode(`🎨 材质 ${matHash} (${triCount} 面)`, false);
+
+                // 状态 span（[已贴图] / [纯色]）
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'material-status';
+                statusSpan.style.marginLeft = '4px';
+                matNode.label.appendChild(statusSpan);
+
+                materialNodes.set(matHash, matNode);
+                updateMaterialStatus(matHash);
+
+                // 内联控制面板
+                matNode.childrenContainer.appendChild(createMaterialPanel(matHash));
+
+                esoNode.childrenContainer.appendChild(matNode.element);
+            });
+
+            esoNode.element.querySelector('.tree-children').classList.add('open');
+        }
+
+        function createTreeNode(text, isOpen) {
+            const div = document.createElement('div');
+            const label = document.createElement('div');
+            label.className = 'tree-node';
+            label.innerHTML = `<span class="tree-icon">${isOpen ? '▼' : '▶'}</span>${text}`;
+
+            const childrenContainer = document.createElement('div');
+            childrenContainer.className = 'tree-children';
+
+            label.addEventListener('click', () => {
+                childrenContainer.classList.toggle('open');
+                const icon = label.querySelector('.tree-icon');
+                icon.innerText = childrenContainer.classList.contains('open') ? '▼' : '▶';
+            });
+
+            div.appendChild(label);
+            div.appendChild(childrenContainer);
+            return { element: div, label, childrenContainer };
+        }
+
+        // ================= 材质内联控制面板 =================
+        function createMaterialPanel(matHash) {
+            const panel = document.createElement('div');
+            panel.className = 'material-panel';
+
+            // 1) 导入本地图片
+            const importBtn = document.createElement('button');
+            importBtn.textContent = '📁 导入图片';
+            importBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.onchange = (ev) => {
+                    const file = ev.target.files[0];
+                    if (file) applyTexture(matHash, URL.createObjectURL(file));
+                };
+                input.click();
+            });
+            panel.appendChild(importBtn);
+
+            // 2) 预设贴图 0 ~ 3
+            const presetRow = document.createElement('div');
+            presetRow.className = 'preset-row';
+            PRESET_TEXTURES.forEach((base64, index) => {
+                const btn = document.createElement('button');
+                btn.textContent = index;
+                btn.title = base64 ? `预设贴图 ${index}` : `预设 ${index}（未配置 base64）`;
+                if (!base64) btn.disabled = true;
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (base64) applyTexture(matHash, base64);
+                });
+                presetRow.appendChild(btn);
+            });
+            panel.appendChild(presetRow);
+
+            // 3) 纯色调色板
+            const colorRow = document.createElement('div');
+            colorRow.className = 'color-row';
+
+            const colorInput = document.createElement('input');
+            colorInput.type = 'color';
+            colorInput.value = '#ffffff';
+
+            const applyColorBtn = document.createElement('button');
+            applyColorBtn.textContent = '上色';
+            applyColorBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                applyColor(matHash, colorInput.value);
+            });
+
+            // 拖动调色时实时预览
+            colorInput.addEventListener('input', (e) => {
+                e.stopPropagation();
+                applyColor(matHash, colorInput.value);
+            });
+
+            colorRow.appendChild(colorInput);
+            colorRow.appendChild(applyColorBtn);
+            panel.appendChild(colorRow);
+
+            // 4) 恢复默认
+            const clearBtn = document.createElement('button');
+            clearBtn.className = 'clear-btn';
+            clearBtn.textContent = '🗑 恢复默认材质';
+            clearBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                clearMaterialOverride(matHash);
+            });
+            panel.appendChild(clearBtn);
+
+            return panel;
+        }
+
+        // ================= 材质应用 =================
+        function applyTexture(matHash, url) {
+            const loader = new THREE.TextureLoader();
+            const tex = loader.load(url);
+            tex.flipY = false;
+            tex.encoding = THREE.sRGBEncoding;
+
+            if (materialTextures.has(matHash)) {
+                const old = materialTextures.get(matHash);
+                if (old !== tex) old.dispose();
+            }
+            materialTextures.set(matHash, tex);
+            materialColors.delete(matHash);
+
+            updateMaterial(matHash);
+            updateMaterialStatus(matHash);
+        }
+
+        function applyColor(matHash, hex) {
+            materialColors.set(matHash, parseInt(hex.replace('#', '0x'), 16));
+            if (materialTextures.has(matHash)) {
+                materialTextures.get(matHash).dispose();
+                materialTextures.delete(matHash);
+            }
+            updateMaterial(matHash);
+            updateMaterialStatus(matHash);
+        }
+
+        function clearMaterialOverride(matHash) {
+            if (materialTextures.has(matHash)) {
+                materialTextures.get(matHash).dispose();
+                materialTextures.delete(matHash);
+            }
+            materialColors.delete(matHash);
+            updateMaterial(matHash);
+            updateMaterialStatus(matHash);
+        }
+
+        // 只更新对应 mesh 的材质，不重建场景/相机
+        function updateMaterial(matHash) {
+            if (!currentObject) return;
+            currentObject.traverse(child => {
+                if (!child.isMesh || child.userData.matHash !== matHash) return;
+
+                const mat = child.material;
+                const hadMap = !!mat.map;
+                const hadVC = mat.vertexColors;
+
+                if (materialTextures.has(matHash)) {
+                    mat.map = materialTextures.get(matHash);
+                    mat.color.setHex(0xffffff);
+                    mat.vertexColors = false;
+                } else if (materialColors.has(matHash)) {
+                    mat.map = null;
+                    mat.color.set(materialColors.get(matHash));
+                    mat.vertexColors = false;
+                } else {
+                    mat.map = null;
+                    mat.color.setHex(0xffffff);
+                    mat.vertexColors = !!child.geometry.attributes.color;
+                }
+
+                // 只有 shader 宏变化时才需要重新编译
+                if (hadMap !== !!mat.map || hadVC !== mat.vertexColors) {
+                    mat.needsUpdate = true;
+                }
+            });
+        }
+
+        function updateMaterialStatus(matHash) {
+            const matNode = materialNodes.get(matHash);
+            if (!matNode) return;
+            const span = matNode.label.querySelector('.material-status');
+            if (!span) return;
+            if (materialTextures.has(matHash)) {
+                span.innerHTML = '<span style="color:#4caf50;">[已贴图]</span>';
+            } else if (materialColors.has(matHash)) {
+                span.innerHTML = '<span style="color:#ffeb3b;">[纯色]</span>';
+            } else {
+                span.innerHTML = '';
+            }
+        }
+
+        // 首次加载 ESO 时，按文件名自动匹配 filePool 里的图片
+        function autoMatchTextures(esoData) {
+            esoData.models.forEach(m => {
+                if (materialTextures.has(m.matHash) || materialColors.has(m.matHash)) return;
+                for (const [name, data] of filePool.entries()) {
+                    if (!data.url) continue;
+                    if (name.toLowerCase().includes(m.matHash.toLowerCase()) &&
+                        (name.endsWith('.png') || name.endsWith('.jpg'))) {
+                        const loader = new THREE.TextureLoader();
+                        const tex = loader.load(data.url);
+                        tex.flipY = false;
+                        tex.encoding = THREE.sRGBEncoding;
+                        materialTextures.set(m.matHash, tex);
+                        break;
+                    }
+                }
+            });
+        }
+
+        // ================= ESO -> XML =================
+        function generateXMLString(data) {
+            let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<Models V01="${data.v01}" V02="${data.v02}" `;
+            xml += `NodeChild="${data.hash1}" NodeSibling="${data.hash2}" V07="${data.v07}" V08="${data.v08}" V09="${data.v09}" `;
+            xml += `ScaleXYZ="${data.scaleXYZ}" Translate="${data.translate.join(',')}" Rotate="${data.rotate.join(',')}" Scale="${data.scale.join(',')}" `;
+            xml += `V20="${data.v20}" V21="${data.v21}" BoundingMin="${data.bMin.join(',')}" BoundingMax="${data.bMax.join(',')}">\n`;
+
+            data.models.forEach(m => {
+                xml += `  <Model MaterialAsset="${m.matHash}">\n`;
+                for (let i = 0; i < m.indices.length; i += 3) {
+                    xml += `    <Triangle>\n`;
+                    for (let j = 0; j < 3; j++) {
+                        const idx = m.indices[i + j];
+                        const px = m.positions[idx * 3].toFixed(6);
+                        const py = m.positions[idx * 3 + 1].toFixed(6);
+                        const pz = m.positions[idx * 3 + 2].toFixed(6);
+                        xml += `      <Vertex Position="${px},${py},${pz}"`;
+                        if (m.normals) {
+                            xml += ` Normal="${m.normals[idx * 3].toFixed(6)},${m.normals[idx * 3 + 1].toFixed(6)},${m.normals[idx * 3 + 2].toFixed(6)}"`;
+                        }
+                        if (m.colors) {
+                            const r = Math.floor(m.colors[idx * 3] * 255).toString(16).padStart(2, '0');
+                            const g = Math.floor(m.colors[idx * 3 + 1] * 255).toString(16).padStart(2, '0');
+                            const b = Math.floor(m.colors[idx * 3 + 2] * 255).toString(16).padStart(2, '0');
+                            xml += ` Color="#${r}${g}${b}"`;
+                        }
+                        if (m.uvs) {
+                            xml += ` TexCoord="${m.uvs[idx * 2].toFixed(6)},${m.uvs[idx * 2 + 1].toFixed(6)}"`;
+                        }
+                        xml += ` />\n`;
+                    }
+                    xml += `    </Triangle>\n`;
+                }
+                xml += `  </Model>\n`;
+            });
+            xml += `</Models>`;
+            return xml;
+        }
+
+        // ================= 文件处理 =================
+        function handleFiles(files) {
+            const promises = Array.from(files).map(file => {
+                return new Promise((resolve) => {
+                    const name = file.name;
+                    const reader = new FileReader();
+
+                    if (name.endsWith('.eso')) {
+                        reader.onload = (e) => {
+                            const buffer = e.target.result;
+                            filePool.set(name, { file, buffer });
+                            try {
+                                currentESOData = parseESO(buffer);
+                                autoMatchTextures(currentESOData);
+                                renderESO(currentESOData);
+                            } catch (err) {
+                                console.error('解析 ESO 失败', err);
+                                alert('解析 ESO 失败，可能不是有效的 Models 文件。');
+                            }
+                            resolve();
+                        };
+                        reader.readAsArrayBuffer(file);
+                    } else if (name.endsWith('.png') || name.endsWith('.jpg')) {
+                        const url = URL.createObjectURL(file);
+                        filePool.set(name, { file, url });
+
+                        if (currentESOData) {
+                            currentESOData.models.forEach(m => {
+                                if (name.toLowerCase().includes(m.matHash.toLowerCase()) &&
+                                    !materialTextures.has(m.matHash) &&
+                                    !materialColors.has(m.matHash)) {
+                                    const loader = new THREE.TextureLoader();
+                                    const tex = loader.load(url);
+                                    tex.flipY = false;
+                                    tex.encoding = THREE.sRGBEncoding;
+                                    materialTextures.set(m.matHash, tex);
+                                    updateMaterial(m.matHash);
+                                    updateMaterialStatus(m.matHash);
+                                }
+                            });
+                        }
+                        resolve();
+                    } else {
+                        resolve();
+                    }
+                });
+            });
+
+            Promise.all(promises);
+        }
+
+        // ================= UI 事件绑定 =================
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        document.getElementById('wireframe').addEventListener('change', (e) => {
+            if (currentObject) {
+                currentObject.traverse(child => {
+                    if (child.isMesh) child.material.wireframe = e.target.checked;
+                });
+            }
+        });
+
+        document.getElementById('show-axes').addEventListener('change', (e) => {
+            if (axesHelper) axesHelper.visible = e.target.checked;
+        });
+
+        document.getElementById('btn-export-xml').addEventListener('click', () => {
+            if (!currentESOData) return;
+            document.getElementById('xml-output').value = generateXMLString(currentESOData);
+            document.getElementById('modal').style.display = 'flex';
+        });
+
+        window.downloadXml = function () {
+            const blob = new Blob([document.getElementById('xml-output').value], { type: 'text/xml' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = (currentESOData.filename || 'model') + '.xml';
+            a.click();
+        };
+
+        initThree();
+    }
+    </script>
+</head>
+<body>
+
+<div id="sidebar">
+    <div id="sidebar-header">
+        <h3 style="margin:0 0 10px 0;">EDGE 资源加载器</h3>
+        <div id="drop-zone">
+            拖拽 .eso / .png 文件到这里<br>
+            <small>(可多选，自动匹配材质)</small>
+        </div>
+        <input type="file" id="file-input" multiple accept=".eso,.xml,.png,.jpg">
+    </div>
+
+    <div id="tree-container">
+        <div style="color:#888; font-style:italic;">等待加载模型...</div>
+    </div>
+
+    <div id="controls">
+        <div class="control-row">
+            <label><input type="checkbox" id="wireframe"> 线框模式</label>
+            <label><input type="checkbox" id="show-axes" checked> 坐标轴</label>
+        </div>
+        <div class="control-row">
+            <button id="btn-export-xml" disabled>导出 XML</button>
+            <button id="btn-compile-eso" disabled>编译为 ESO</button>
+        </div>
+        <div class="control-row" style="font-size:11px; color:#888; margin-top:5px;">
+            提示: 展开材质节点可导入贴图 / 选择预设 / 调色
+        </div>
+    </div>
+</div>
+
+<div id="viewport">
+    <div id="info">
+        三角形: <span id="tri-count">0</span> | FPS: <span id="fps">0</span><br>
+        包围盒: <span id="bbox-info">-</span>
+    </div>
+</div>
+
+<div id="modal">
+    <div id="modal-content">
+        <h3>XML 源码</h3>
+        <textarea id="xml-output"></textarea>
+        <div style="text-align:right; margin-top:10px;">
+            <button onclick="document.getElementById('modal').style.display='none'">关闭</button>
+            <button onclick="downloadXml()">下载 XML</button>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
