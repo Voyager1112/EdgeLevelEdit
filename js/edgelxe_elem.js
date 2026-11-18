@@ -473,7 +473,15 @@ function _refreshButtonsBoundTo(mp) {
 
 // ============ 缓存脏标记 ============
 const _dirtyKeys = new Set();
-function _markDirty(...keys) { keys.forEach(k => _dirtyKeys.add(k)); }
+function _markDirty(...keys) {
+    keys.forEach(k => {
+        _dirtyKeys.add(k);
+        // ★ 静态方块变化时标记 3D 脏
+        if (k.startsWith('layer_') && typeof window._markStatic3DDirty === 'function') {
+            window._markStatic3DDirty();
+        }
+    });
+}
 function _markAllDirty() {
 	_markDirty('meta', 'moving', 'falling', 'prism', 'resizer', 'bumper',
 		'checkpoint', 'cameratrigger', 'button', 'buttonSequence',

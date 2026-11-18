@@ -6,7 +6,7 @@ let _panelJustChanged = false;
 function _setPanelHtml(html) {
     if (html === _lastPanelHtml) return false;
     _lastPanelHtml = html;
-    _setPanelHtml(html);
+    panelContent.innerHTML = html;
     _panelJustChanged = true;
     return true;
 }

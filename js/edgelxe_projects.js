@@ -171,6 +171,10 @@ function restoreData(data) {
     rebuildSpatialIndex();
     _recalcStaticCounts();
 
+    // 切换项目后同步复选框 UI （restoreData 里，rebuildSpatialIndex() 之后)
+    if (typeof syncVisibilityUI === 'function') syncVisibilityUI();
+    if (typeof _syncToolbarCheckboxes === 'function') _syncToolbarCheckboxes();
+
     // 画布范围
     updateCanvasRangeFromSize();
     const z = state.currentLayer;

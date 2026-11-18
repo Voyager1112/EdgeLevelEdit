@@ -113,11 +113,17 @@ visibilityTypes.forEach(type => {
 	cb.type = 'checkbox';
     cb.dataset.visKey = type.key;
 	cb.checked = state.visibility[type.key];
-	cb.addEventListener('change', function() {
-		state.visibility[type.key] = this.checked;
-		requestRender();
-		uniInterface();
-	});
+    cb.addEventListener('change', function () {
+        state.visibility[type.key] = this.checked;
+        // ★ 标脏 meta（因为 meta 里包含 visibility）
+        if (typeof _markDirty === 'function') _markDirty('meta');
+        // ★ 3D 也标脏（静态可见性变化）
+        if (type.key === 'static' && typeof window._markStatic3DDirty === 'function') {
+            window._markStatic3DDirty();
+        }
+        requestRender();
+        uniInterface();
+    });
 	label.appendChild(cb);
 	label.appendChild(document.createTextNode(type.label));
 	visibilityDiv.appendChild(label);
@@ -1368,6 +1374,15 @@ function placeElementAt(tool, x, y, z) {
 
 function clear3DScene() {
     if (!threeScene) return;
+    
+    // ★ 清理静态 InstancedMesh
+    _staticInstancedMeshes.forEach(mesh => {
+        threeScene.remove(mesh);
+        if (mesh.material) mesh.material.dispose();
+    });
+    _staticInstancedMeshes = [];
+    _static3dDirty = true;
+    
     // 移除所有自定义对象（lights, grid等固有对象保留）
     threeObjects.forEach(obj => {
         threeScene.remove(obj);

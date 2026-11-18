@@ -1,7 +1,78 @@
-// ============ 元素列表差异更新缓存 ============
-const _elemListCache = new Map();   // key -> { sig, nodes: HTMLElement[] }
+// ============ 元素列表差异更新 ============
+const _elemListCache = new Map();   // key -> { sig, nodes }
 let _elemListLastFilter = null;
+let _lastUnifiedBaseSig = null;
 
+function _htmlToNodes(html) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    return Array.from(wrap.children);
+}
+
+// 普通元素（非 buttonsequence）：原 updateElemList 里的 html 拼接逻辑搬过来
+function _renderNormalElemItem(item) {
+    const active = (state.selectedElement && state.selectedElement.type === item.type &&
+                    state.selectedElement.id === item.id) ? 'active' : '';
+    let extraButtons = '';
+
+    if (item.type === 'checkpoint') {
+        const idx = state.checkpoints.findIndex(c => c.id === item.id);
+        if (idx !== -1) {
+            extraButtons = `
+                <button class="btn-sm" onclick="event.stopPropagation(); moveCheckpoint(${idx}, -1)" style="margin-left:4px;">↑</button>
+                <button class="btn-sm" onclick="event.stopPropagation(); moveCheckpoint(${idx}, 1)" style="margin-left:2px;">↓</button>
+            `;
+        }
+    }
+
+    return `<div class="elem-item ${active}" onclick="selectElement('${item.type}', '${item.id}')">
+                <span>${item.desc}</span>
+                ${extraButtons}
+            </div>`;
+}
+
+// buttonsequence 复合块：父项 + 展开的子按钮，作为单一更新单元
+function _renderButtonSequenceBlock(item, seq, movingPosMap) {
+    const active = (state.selectedElement && state.selectedElement.type === 'buttonsequence' &&
+                    state.selectedElement.id === item.id) ? 'active' : '';
+    const expanded = state.expandedSequences && state.expandedSequences[item.id];
+    const hasChildren = seq.buttons && seq.buttons.length > 0;
+
+    let html = `<div class="elem-item ${active}" onclick="selectElement('${item.type}', '${item.id}')">
+        <span>${item.desc}</span>
+        ${hasChildren ? `<button class="btn-sm" onclick="event.stopPropagation(); toggleSequenceExpand('${item.id}')" 
+                                title="${expanded ? '收起' : '展开'}" style="margin-left:4px;">${expanded ? '▼' : '◀'}</button>` : ''}
+    </div>`;
+
+    if (hasChildren && expanded) {
+        seq.buttons.forEach((btn, idx) => {
+            const subActive = (state.selectedElement &&
+                               state.selectedElement.type === 'seqbutton' &&
+                               state.selectedElement.id === btn.id) ? 'active' : '';
+            const dispId = btn.xmlId ? `${btn.id}(${btn.xmlId})` : btn.id;
+            let subMpStr = btn.movingPlatformID ? `[${btn.movingPlatformID}]` : '';
+            let subCoordStr = '';
+            if (btn.movingPlatformID) {
+                const pos = movingPosMap[btn.movingPlatformID];
+                subCoordStr = pos ? `${pos.x},${pos.y},${pos.z}` : '?';
+            } else if (btn.position) {
+                subCoordStr = `${btn.position.x},${btn.position.y},${btn.position.z}`;
+            } else {
+                subCoordStr = '-';
+            }
+            html += `<div class="elem-item ${subActive}" 
+                          style="padding-left:22px;font-size:11px;"
+                          onclick="selectElement('seqbutton', '${btn.id}')">
+                <span>↳ #${idx+1} ${dispId} ${subMpStr} (${subCoordStr})</span>
+                <span style="display:flex;gap:2px;">
+                    <button class="btn-sm" onclick="event.stopPropagation(); moveSeqButtonInList('${item.id}', ${idx}, -1)">↑</button>
+                    <button class="btn-sm" onclick="event.stopPropagation(); moveSeqButtonInList('${item.id}', ${idx}, 1)">↓</button>
+                </span>
+            </div>`;
+        });
+    }
+    return html;
+}
 // 工具函数
 function showToast(msg) {
 	toastEl.textContent = msg;
@@ -259,14 +330,14 @@ function updateElemList() {
     if (state._suppressUI) return;
     const filterType = document.getElementById('elemFilterSelect')?.value || 'all';
 
-    // filter 变了，全部重建（不同 filter 展示的元素完全不同）
+    // filter 变了 → 全量重建
     if (filterType !== _elemListLastFilter) {
         _elemListCache.clear();
         elemListContainer.innerHTML = '';
         _elemListLastFilter = filterType;
     }
 
-    // ---- 收集 all（保持原逻辑，一行没改） ----
+    // ---- 收集 all（原逻辑不变） ----
     const all = [];
     const movingPosMap = {};
     state.movingPlatforms.forEach(m => {
@@ -316,7 +387,7 @@ function updateElemList() {
         return;
     }
 
-    // ---- 构建 blocks（一个 block = 一组相邻 elem-item） ----
+    // ---- 构建 blocks + 差异更新 ----
     const blocks = [];
     const seenKeys = new Set();
 
@@ -337,25 +408,23 @@ function updateElemList() {
         seenKeys.add(key);
     }
 
-    // ---- "创建按钮序列"按钮单独保存，不参与 diff ----
+    // 确保 add 按钮存在（始终作为最后一个 child）
     let addBtnWrap = elemListContainer.querySelector('[data-role="elem-add-btn"]');
-    if (addBtnWrap) addBtnWrap.remove();
-    else {
+    if (!addBtnWrap) {
         addBtnWrap = document.createElement('div');
         addBtnWrap.dataset.role = 'elem-add-btn';
         addBtnWrap.style.padding = '4px 0';
         addBtnWrap.innerHTML = '<button class="add-btn" onclick="addButtonSequence()">+ 创建按钮序列</button>';
+        elemListContainer.appendChild(addBtnWrap);
     }
 
-    // ---- 差异更新 ----
+    // 复用缓存 or 重建
     const finalNodes = [];
     for (const block of blocks) {
         const cached = _elemListCache.get(block.key);
         if (!cached || cached.sig !== block.sig) {
-            // 变化：重建该块的 DOM
             if (cached) cached.nodes.forEach(n => n.remove());
             const nodes = _htmlToNodes(block.html);
-            nodes.forEach(n => n.dataset.elemKey = block.key);
             _elemListCache.set(block.key, { sig: block.sig, nodes });
             finalNodes.push(...nodes);
         } else {
@@ -363,16 +432,16 @@ function updateElemList() {
         }
     }
 
-    // 删除已不存在的块
-    _elemListCache.forEach((entry, key) => {
+    // 删除不再存在的块
+    for (const [key, entry] of _elemListCache) {
         if (!seenKeys.has(key)) {
             entry.nodes.forEach(n => n.remove());
             _elemListCache.delete(key);
         }
-    });
+    }
 
-    // ---- 判断现有顺序是否需要重排（关键：顺序没变就不碰 DOM） ----
-    const currentChildren = Array.from(elemListContainer.children).filter(n => !n.dataset.role);
+    // 顺序检查：顺序没变就不碰 DOM
+    const currentChildren = Array.from(elemListContainer.children).filter(n => n !== addBtnWrap);
     let needsReorder = currentChildren.length !== finalNodes.length;
     if (!needsReorder) {
         for (let i = 0; i < finalNodes.length; i++) {
@@ -380,21 +449,20 @@ function updateElemList() {
         }
     }
     if (needsReorder) {
-        const frag = document.createDocumentFragment();
-        finalNodes.forEach(n => frag.appendChild(n));
-        elemListContainer.insertBefore(frag, elemListContainer.firstChild);
+        for (const node of finalNodes) {
+            elemListContainer.insertBefore(node, addBtnWrap);
+        }
     }
 
-    // 追加回"创建按钮序列"
-    elemListContainer.appendChild(addBtnWrap);
+    // add 按钮确保在最后
+    if (elemListContainer.lastElementChild !== addBtnWrap) {
+        elemListContainer.appendChild(addBtnWrap);
+    }
 
     refreshUnifiedBaseList();
 }
 
-let _lastUnifiedBaseSig = null;
-
 function refreshUnifiedBaseList() {
-    // 签名：所有有 xmlId 的平台 + 它们的坐标
     const parts = [];
     for (const m of state.movingPlatforms) {
         if (!m.xmlId) continue;
@@ -794,67 +862,88 @@ function _validateSelectedElement() {
     }
 }
 
-const CACHE_FORMAT_VERSION = 2;
+// 每层单独压缩
+function compressLayerForStorage(layer, w, l) {
+    const palette = [];
+    const colorMap = new Map();
+    const entries = [];
+    for (let y = 0; y < l; y++) {
+        const row = layer[y];
+        if (!row) continue;
+        for (let x = 0; x < w; x++) {
+            const block = row[x];
+            if (!block) continue;
+            const colorKey = `${block.r},${block.g},${block.b}`;
+            let cIdx = colorMap.get(colorKey);
+            if (cIdx === undefined) {
+                cIdx = palette.length;
+                palette.push([block.r, block.g, block.b]);
+                colorMap.set(colorKey, cIdx);
+            }
+            entries.push(x, y, cIdx);   // ★ 只存 x, y, cIdx（z 在外面）
+        }
+    }
+    return { palette, entries };
+}
+
+function decompressLayerFromStorage(packed, w, l) {
+    const layer = Array.from({ length: l }, () => Array(w).fill(null));
+    const palette = packed.palette;
+    const entries = packed.entries;
+    for (let i = 0; i < entries.length; i += 3) {
+        const x = entries[i];
+        const y = entries[i + 1];
+        const color = palette[entries[i + 2]];
+        if (layer[y] && color) layer[y][x] = { r: color[0], g: color[1], b: color[2] };
+    }
+    return layer;
+}
+
+
+const CACHE_FORMAT_VERSION = 3;
 
 function compressDataForStorage(data) {
-    if (!data || !data.staticBlocks || !data.level || !data.level.size) {
-        return data;
-    }
+    if (!data || !data.staticBlocks || !data.level || !data.level.size) return data;
+    
+    const palette = []; // 颜色池
+    const colorMap = new Map(); // 颜色到索引的映射
+    const entries = []; // 拍平的方块数据
 
-    const entries = [];
     for (const zKey in data.staticBlocks) {
         const layer = data.staticBlocks[zKey];
         if (!layer) continue;
         const z = parseInt(zKey, 10);
-        if (isNaN(z)) continue;
         for (let y = 0; y < layer.length; y++) {
             const row = layer[y];
             if (!row) continue;
             for (let x = 0; x < row.length; x++) {
-                const b = row[x];
-                if (b) entries.push([x, y, z, b.r, b.g, b.b]);
+                const block = row[x];
+                if (!block) continue;
+                
+                // 提取颜色特征
+                const colorKey = `${block.r},${block.g},${block.b}`;
+                let colorIdx = colorMap.get(colorKey);
+                
+                // 如果是新颜色，加入调色板
+                if (colorIdx === undefined) {
+                    colorIdx = palette.length;
+                    palette.push([block.r, block.g, block.b]); // 用数组节省空间
+                    colorMap.set(colorKey, colorIdx);
+                }
+                
+                // ★ 核心：采用平铺一维数组，极大减少 JSON 的括号数量
+                entries.push(x, y, z, colorIdx);
             }
         }
     }
 
     const copy = { ...data };
     delete copy.staticBlocks;
-    // ★ 即使 entries 为空也写进去，让解压能走统一分支
-    copy.staticBlocksSparse = entries;
+    
+    copy.staticBlocksPalette = palette; // 存放所有用到的颜色
+    copy.staticBlocksData = entries;    // 存放 [x,y,z,cIdx, x,y,z,cIdx...]
     copy._cacheFormat = CACHE_FORMAT_VERSION;
     return copy;
-}
-
-function decompressDataFromStorage(data) {
-    if (!data) return data;
-
-    // ① 新稀疏格式
-    if (Array.isArray(data.staticBlocksSparse)) {
-        const { w, l } = (data.level && data.level.size) || { w: 0, l: 0 };
-        const staticBlocks = {};
-        for (const entry of data.staticBlocksSparse) {
-            const [x, y, z, r, g, b] = entry;
-            let layer = staticBlocks[z];
-            if (!layer) {
-                layer = Array.from({ length: l }, () => Array(w).fill(null));
-                staticBlocks[z] = layer;
-            }
-            if (layer[y]) layer[y][x] = { r, g, b };
-        }
-        const copy = { ...data };
-        delete copy.staticBlocksSparse;
-        delete copy._cacheFormat;
-        copy.staticBlocks = staticBlocks;
-        return copy;
-    }
-
-    // ② 老 base64 格式（兼容之前存过的缓存）
-    if (data.staticBlocksCompressed) {
-        return decompressLegacyBase64(data);
-    }
-
-    // ③ 已经是 dense staticBlocks（不压缩的场景）
-    return data;
 }
 
 function decompressLegacyBase64(data) {
@@ -885,6 +974,64 @@ function decompressLegacyBase64(data) {
     delete copy.staticBlocksCompressed;
     copy.staticBlocks = staticBlocks;
     return copy;
+}
+
+function decompressDataFromStorage(data) {
+    if (!data) return data;
+
+    // ① 新调色板格式（放宽：只要有 staticBlocksPalette 就解压）
+    if (Array.isArray(data.staticBlocksPalette) && Array.isArray(data.staticBlocksData)) {
+        const { w, l } = data.level.size;
+        const staticBlocks = {};
+        const palette = data.staticBlocksPalette;
+        const entries = data.staticBlocksData;
+
+        for (let i = 0; i < entries.length; i += 4) {
+            const x = entries[i];
+            const y = entries[i + 1];
+            const z = entries[i + 2];
+            const color = palette[entries[i + 3]];
+            if (!color) continue;
+            if (!staticBlocks[z]) {
+                staticBlocks[z] = Array.from({ length: l }, () => Array(w).fill(null));
+            }
+            if (staticBlocks[z][y]) staticBlocks[z][y][x] = { r: color[0], g: color[1], b: color[2] };
+        }
+
+        const copy = { ...data };
+        delete copy.staticBlocksPalette;
+        delete copy.staticBlocksData;
+        copy._cacheFormat = CACHE_FORMAT_VERSION;
+        copy.staticBlocks = staticBlocks;
+        return copy;
+    }
+
+    // ② 兼容旧的稀疏格式（如果你以前存过的）
+    if (Array.isArray(data.staticBlocksSparse)) {
+        const { w, l } = (data.level && data.level.size) || { w: 0, l: 0 };
+        const staticBlocks = {};
+        for (const entry of data.staticBlocksSparse) {
+            const [x, y, z, r, g, b] = entry;
+            let layer = staticBlocks[z];
+            if (!layer) {
+                layer = Array.from({ length: l }, () => Array(w).fill(null));
+                staticBlocks[z] = layer;
+            }
+            if (layer[y]) layer[y][x] = { r, g, b };
+        }
+        const copy = { ...data };
+        delete copy.staticBlocksSparse;
+        delete copy._cacheFormat;
+        copy.staticBlocks = staticBlocks;
+        return copy;
+    }
+    
+    // ② 老 base64 格式（兼容之前存过的缓存）
+    if (data.staticBlocksCompressed) {
+        return decompressLegacyBase64(data);
+    }
+    
+    return data;
 }
 
 

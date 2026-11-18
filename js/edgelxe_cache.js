@@ -39,19 +39,22 @@ function doRealSaveCache() {
       localStorage.setItem(CACHE_V3_META, JSON.stringify(meta));
     }
 
-    // 每层静态方块（sparse）
+    // 每层静态方块（调色板压缩格式 { palette, entries }）
     for (const key of dirty) {
-      if (key.startsWith('layer_')) {
-        const z = key.slice(6);
-        const layer = state.staticBlocks[z];
-        const sparse = [];
-        if (layer) for (let y = 0; y < layer.length; y++) {
-          const row = layer[y]; if (!row) continue;
-          for (let x = 0; x < row.length; x++) if (row[x]) sparse.push([x, y, row[x].r, row[x].g, row[x].b]);
+        if (key.startsWith('layer_')) {
+            const z = key.slice(6);
+            const layer = state.staticBlocks[z];
+            if (!layer) {
+                localStorage.removeItem(CACHE_V3_LAYER + z);
+                continue;
+            }
+            const packed = compressLayerForStorage(layer, state.level.size.w, state.level.size.l);
+            if (packed.entries.length === 0) {
+                localStorage.removeItem(CACHE_V3_LAYER + z);
+            } else {
+                localStorage.setItem(CACHE_V3_LAYER + z, JSON.stringify(packed));
+            }
         }
-        if (sparse.length === 0) localStorage.removeItem(CACHE_V3_LAYER + z);
-        else localStorage.setItem(CACHE_V3_LAYER + z, JSON.stringify(sparse));
-      }
     }
 
     // 各类型数组
@@ -223,6 +226,7 @@ function _finishLoadCache() {
     state._hasUnsavedChanges = false;
     
     if (typeof _syncToolbarCheckboxes === 'function') _syncToolbarCheckboxes();
+    if (typeof syncVisibilityUI === 'function') syncVisibilityUI();
 
     // ---- 项目同步 ----
     /*const pid = localStorage.getItem('edge_xml_editor_current_pid');
@@ -254,7 +258,7 @@ function loadCache() {
                 if (meta.nextIdCounter !== undefined) state.nextIdCounter = meta.nextIdCounter;
                 if (meta.unknownElements) state.unknownElements = meta.unknownElements;
 
-                // ---- 每层静态方块 ----
+                // ---- 每层静态方块（兼容新调色板格式和旧稀疏格式） ----
                 const staticBlocks = {};
                 const { w, l } = state.level.size;
                 for (let i = 0; i < localStorage.length; i++) {
@@ -262,15 +266,28 @@ function loadCache() {
                     if (!k || !k.startsWith(CACHE_V3_LAYER)) continue;
                     const z = parseInt(k.slice(CACHE_V3_LAYER.length), 10);
                     if (isNaN(z) || z < 0) continue;
-                    let sparse = [];
-                    try { sparse = JSON.parse(localStorage.getItem(k) || '[]'); } catch (e) { sparse = []; }
-                    if (!Array.isArray(sparse) || sparse.length === 0) continue;
-                    const layer = Array.from({ length: l }, () => Array(w).fill(null));
-                    for (const entry of sparse) {
-                        const [x, y, r, g, b] = entry;
-                        if (layer[y] && x >= 0 && x < w) layer[y][x] = { r, g, b };
+
+                    let raw = null;
+                    try { raw = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { raw = null; }
+                    if (!raw) continue;
+
+                    let layer = null;
+
+                    // ① 新调色板格式：{ palette: [[r,g,b],...], entries: [x,y,cIdx,...] }
+                    if (raw && Array.isArray(raw.palette) && Array.isArray(raw.entries)) {
+                        layer = decompressLayerFromStorage(raw, w, l);
                     }
-                    staticBlocks[z] = layer;
+                    // ② 旧稀疏格式：[[x,y,r,g,b],...]
+                    else if (Array.isArray(raw) && raw.length > 0) {
+                        layer = Array.from({ length: l }, () => Array(w).fill(null));
+                        for (const entry of raw) {
+                            if (!Array.isArray(entry) || entry.length < 5) continue;
+                            const [x, y, r, g, b] = entry;
+                            if (layer[y] && x >= 0 && x < w) layer[y][x] = { r, g, b };
+                        }
+                    }
+
+                    if (layer) staticBlocks[z] = layer;
                 }
                 state.staticBlocks = staticBlocks;
 

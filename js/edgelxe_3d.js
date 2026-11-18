@@ -232,6 +232,16 @@ const meshToElement = new Map(); // key: mesh, value: { type, id, data? }
 
 let currentHighlightHelper = null;
 
+// ============ 静态方块池化 ============
+let _staticBoxGeo = null;                // 共享几何体，只创建一次
+let _staticInstancedMeshes = [];         // 当前场景中的所有 InstancedMesh
+let _static3dDirty = true;               // true = 数据变了，需要重建 InstancedMesh
+let _lastStaticVisibility = null;        // 上次渲染时的 visibility.static 值
+
+window._markStatic3DDirty = function () {
+    _static3dDirty = true;
+};
+
 function render3D() {
     if (!threeScene) {
         initThree();
@@ -291,52 +301,75 @@ function render3D() {
 	}
 
     // ---- 静态方块（性能优化：InstancedMesh + 支持拾取） ----
-    const staticBoxGeo = new THREE.BoxGeometry(blockSize - gap, blockSize - gap, blockSize - gap);
-    const staticBlocksToRender = [];
-    for (let z = 0; z < h; z++) {
-        const layer = state.staticBlocks[z];
-        if (!layer) continue;
-        for (let y = 0; y < l; y++) {
-            for (let x = 0; x < w; x++) {
-                const block = layer[y] && layer[y][x];
-                if (block && state.visibility.static) {
-                    staticBlocksToRender.push({ x, y, z, block });
+    // ---- 静态方块（池化：只在数据变化时重建 InstancedMesh） ----
+    const needsStaticRebuild = _static3dDirty || (_lastStaticVisibility !== state.visibility.static);
+    if (needsStaticRebuild) {
+        // 1. 销毁旧的 InstancedMesh
+        _staticInstancedMeshes.forEach(mesh => {
+            threeScene.remove(mesh);
+            if (mesh.material) mesh.material.dispose();
+            // _staticBoxGeo 是共享的，不 dispose
+        });
+        _staticInstancedMeshes = [];
+
+        // 2. 共享几何体（只创建一次）
+        if (!_staticBoxGeo) {
+            _staticBoxGeo = new THREE.BoxGeometry(blockSize - gap, blockSize - gap, blockSize - gap);
+        }
+
+        // 3. 只在 visibility.static 为 true 时重建
+        if (state.visibility.static) {
+            // 利用 _staticCounts 跳过空层，避免遍历空层
+            const counts = state._staticCounts || {};
+            const colorGroups = new Map();
+
+            for (let z = 0; z < h; z++) {
+                if (!counts[z]) continue;            // 空层跳过
+                const layer = state.staticBlocks[z];
+                if (!layer) continue;
+                for (let y = 0; y < l; y++) {
+                    const row = layer[y];
+                    if (!row) continue;
+                    for (let x = 0; x < w; x++) {
+                        const block = row[x];
+                        if (!block) continue;
+                        const colorStr = `rgb(${block.r},${block.g},${block.b})`;
+                        let arr = colorGroups.get(colorStr);
+                        if (!arr) { arr = []; colorGroups.set(colorStr, arr); }
+                        arr.push({ x, y, z, block });
+                    }
                 }
             }
-        }
-    }
 
-    if (staticBlocksToRender.length > 0) {
-        // 按颜色分组
-        const colorGroups = new Map();
-        for (const item of staticBlocksToRender) {
-            const colorStr = `rgb(${item.block.r},${item.block.g},${item.block.b})`;
-            if (!colorGroups.has(colorStr)) colorGroups.set(colorStr, []);
-            colorGroups.get(colorStr).push(item);
-        }
+            // 4. 按颜色分组创建 InstancedMesh
+            for (const [colorStr, items] of colorGroups.entries()) {
+                const mat = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color(colorStr),
+                    roughness: 0.7,
+                    metalness: 0.1
+                });
+                const instancedMesh = new THREE.InstancedMesh(_staticBoxGeo, mat, items.length);
+                instancedMesh.castShadow = true;
+                instancedMesh.receiveShadow = true;
+                instancedMesh.userData.coords = items;   // raycast 拾取靠这个
 
-        for (const [colorStr, items] of colorGroups.entries()) {
-            const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(colorStr), roughness: 0.7, metalness: 0.1 });
-            const instancedMesh = new THREE.InstancedMesh(staticBoxGeo, mat, items.length);
-            instancedMesh.castShadow = true;
-            instancedMesh.receiveShadow = true;
-            
-            // 存储每个实例对应的坐标，用于点击拾取
-            instancedMesh.userData.coords = items; 
-
-            const dummy = new THREE.Object3D();
-            for (let i = 0; i < items.length; i++) {
-                const { x, y, z } = items[i];
-                dummy.position.set(x - centerX + 0.5, z + 0.5, y - centerZ + 0.5);
-                dummy.updateMatrix();
-                instancedMesh.setMatrixAt(i, dummy.matrix);
+                const dummy = new THREE.Object3D();
+                for (let i = 0; i < items.length; i++) {
+                    const { x, y, z } = items[i];
+                    dummy.position.set(x - centerX + 0.5, z + 0.5, y - centerZ + 0.5);
+                    dummy.updateMatrix();
+                    instancedMesh.setMatrixAt(i, dummy.matrix);
+                }
+                instancedMesh.instanceMatrix.needsUpdate = true;
+                threeScene.add(instancedMesh);
+                _staticInstancedMeshes.push(instancedMesh);
             }
-            instancedMesh.instanceMatrix.needsUpdate = true;
-            threeScene.add(instancedMesh);
-            threeObjects.push(instancedMesh);
         }
-    }
 
+        _static3dDirty = false;
+        _lastStaticVisibility = state.visibility.static;
+    }
+    // else：不重建。InstancedMesh 还在场景里，userData.coords 也还在，raycast 正常工作。
 	// ---- 移动平台 ----
 	const movingGeo = new THREE.BoxGeometry(blockSize - gap, blockSize - gap, blockSize - gap);
 	state.movingPlatforms.forEach(mp => {
