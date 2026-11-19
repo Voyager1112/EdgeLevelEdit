@@ -225,7 +225,7 @@ document.getElementById('close3dBtn').addEventListener('click', function() {
 window.addEventListener('resize', onResize3D);
 
 
-function newProject() {
+/*function newProject() {
     // ★ 退出大项目模式
     state._isLargeProject = false;
     const warn = document.getElementById('largeProjectWarning');
@@ -321,6 +321,130 @@ function newProject() {
 	updateStatus();
 	uniInterface();
 	showToast('已新建空项目');
+}*/
+
+function newProject() {
+    state._isLargeProject = false;
+    const warn = document.getElementById('largeProjectWarning');
+    if (warn) warn.remove();
+
+    // ★ 1. 先重置 level（确定新尺寸）
+    state.level = {
+        id: '10001',
+        name: 'MyLevel',
+        timeThresholds: [9, 25, 55, 85, 145],
+        size: { w: 10, l: 10, h: 3 },
+        spawn: { x: 3, y: 5, z: 1 },
+        exit: { x: 7, y: 5, z: 1 },
+        theme: 0,
+        musicJava: 0,
+        music: 6,
+        zoom: -1,
+        angle: 22,
+        fov: 22,
+        modelTheme: 0
+    };
+
+    // ★ 2. 按新尺寸建空 staticBlocks
+    const { w, l, h } = state.level.size;
+    const newStatic = {};
+    for (let z = 0; z < h; z++) {
+        newStatic[z] = Array.from({ length: l }, () => Array(w).fill(null));
+    }
+    state.staticBlocks = newStatic;
+
+    // ★ 3. 清空所有元素数组
+    state.movingPlatforms = [];
+    state.fallingPlatforms = [];
+    state.prisms = [];
+    state.resizers = [];
+    state.bumpers = [];
+    state.checkpoints = [];
+    state.cameraTriggers = [];
+    state.buttons = [];
+    state.buttonSequences = [];
+    state.otherCubes = [];
+    state.darkCubes = [];
+    state.unknownElements = [];
+    state.nextIdCounter = 1;
+    state._idCounters = {};
+
+    // ★ 4. 重置编辑器状态
+    state.currentLayer = 0;
+    layerInput.value = 0;
+    state.currentChunk = { x: 0, y: 0 };        // ← 新增
+    state._staticCounts = {};                    // ← 新增
+    state.selectedElement = null;
+    state.selectedWaypoint = null;
+    state.multiSelection = [];                   // ← 新增
+    state._lastSelectionBox = null;              // ← 新增
+
+    // ★ 5. 清空撤销栈（不再用 _serializeHistory）
+    state._undoStack = [];
+    state._redoStack = [];
+    state._sessionMarker = null;
+    state._lastSavedSnapshot = null;
+
+    // ★ 6. 清理 3D 场景 + 标记静态池化重建
+    state.highlightedMesh = null;
+    state.selected3D = null;
+    if (typeof window._markStatic3DDirty === 'function') window._markStatic3DDirty();
+    if (typeof threeScene !== 'undefined' && threeScene) {
+        if (typeof clear3DScene === 'function') clear3DScene();
+    }
+
+    // ★ 7. 全量标脏（下次保存时把空状态写进 v3 缓存）
+    if (typeof _markAllDirty === 'function') _markAllDirty();
+
+    // ==========【新增修复开始】重置渲染全局变量，清除画布残影 =========
+    // 2D渲染全局状态重置（来自edgelxe_render2d.js全局变量）
+    _minX = 0;
+    _minY = 0;
+    _currentGridW = 0;
+    _currentGridH = 0;
+    renderRequested = false;
+
+    // 清空2D画布bitmap
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0,0,canvas.width, canvas.height);
+
+    // 强制重建空间索引（清空旧索引残留）
+    rebuildSpatialIndex();
+    state.spatialIndex.clear();
+
+    // 清空选择相关全部状态，防止旧元素残留选中态
+    state.selectedElement = null;
+    state.selected3D = null;
+    state.selectedWaypoint = null;
+    state.multiSelection = [];
+    state._lastSelectionBox = null;
+
+    // 重置分块到原点
+    state.currentChunk = { x:0, y:0 };
+
+    // 强制清空小地图缓存
+    _miniMapLastRender = 0;
+    _miniMapPending = false;
+    // ==========【新增修复结束】=========
+
+
+    // ★ 8. UI 刷新
+    syncLevelUI();
+    updateLayerMax();
+    //requestRender();
+    // 直接同步渲染，不经过 requestRender
+    if (typeof renderGrid === 'function') renderGrid();
+    updatePanel();
+    updateElemList();
+    refreshUnifiedBaseList();
+    updateStatus();
+    uniInterface();
+
+    // ★ 9. 同步复选框 UI
+    if (typeof syncVisibilityUI === 'function') syncVisibilityUI();
+    if (typeof _syncToolbarCheckboxes === 'function') _syncToolbarCheckboxes();
+
+    showToast('已新建空项目');
 }
 
 function updateLayerMax() {
@@ -1382,7 +1506,7 @@ function clear3DScene() {
     });
     _staticInstancedMeshes = [];
     _static3dDirty = true;
-    
+    _lastStaticVisibility = null;
     // 移除所有自定义对象（lights, grid等固有对象保留）
     threeObjects.forEach(obj => {
         threeScene.remove(obj);

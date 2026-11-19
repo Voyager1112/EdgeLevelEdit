@@ -303,7 +303,7 @@ function _applyStep(s, dir) {
                 if (layer && layer[s.y] && layer[s.y][s.x]) {
                     layer[s.y][s.x] = null;
                     _adjustStaticCount(s.z, -1);
-                    _markDirty(`layer_${s.z}`);                                // ★ 只标脏这一层
+                    _markDirty(`layer_${s.z}`); // 只标脏这一层
                 }
             } else {
                 // 撤销删除 / 重做添加
@@ -312,7 +312,7 @@ function _applyStep(s, dir) {
                 const hadBefore = !!layer[s.y][s.x];
                 layer[s.y][s.x] = { ...src };
                 if (!hadBefore) _adjustStaticCount(s.z, 1);
-                _markDirty(`layer_${s.z}`);                                    // ★
+                _markDirty(`layer_${s.z}`);
             }
             break;
         }
@@ -332,7 +332,7 @@ function _applyStep(s, dir) {
                 delete state.staticBlocks[s.z];
                 delete state._staticCounts[s.z];
             }
-            _markDirty(`layer_${s.z}`);                                        // ★
+            _markDirty(`layer_${s.z}`);
             break;
 
         case 'layer':

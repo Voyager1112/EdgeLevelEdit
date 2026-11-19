@@ -129,7 +129,7 @@ function captureCurrentData() {
             autoName: state.autoName,
             keepPrevProps: state.keepPrevProps,
             canvasEditMode: state.canvasEditMode,
-            settings: state.settings,
+            //settings: state.settings,
         });
     } catch (e) {
         console.warn('captureCurrentData 失败', e);
@@ -165,7 +165,7 @@ function restoreData(data) {
     if (data.autoName !== undefined)      state.autoName      = data.autoName;
     if (data.keepPrevProps !== undefined) state.keepPrevProps = data.keepPrevProps;
     if (data.canvasEditMode !== undefined)state.canvasEditMode= data.canvasEditMode;
-    if (data.settings)                    state.settings      = data.settings;
+    //if (data.settings)                    state.settings      = data.settings;
 
     // 索引全量重建（数组引用都换了）
     rebuildSpatialIndex();
@@ -187,7 +187,7 @@ function restoreData(data) {
     // 3D / 选中态清理
     state.highlightedMesh = null;
     state.selected3D = null;
-    if (typeof threeScene !== 'undefined' && threeScene) clear3DScene();
+    //if (typeof threeScene !== 'undefined' && threeScene) clear3DScene();
     _validateSelectedElement();
 
     // ★ 数据全变了：撤销栈清空、session 标记清空
@@ -196,9 +196,15 @@ function restoreData(data) {
     state._sessionMarker = null;
 
     // ★ 缓存全量标脏
-    if (typeof _markAllDirty === 'function') _markAllDirty();
+    //if (typeof _markAllDirty === 'function') _markAllDirty();
 
     if (typeof _syncToolbarCheckboxes === 'function') _syncToolbarCheckboxes();
+
+    if (typeof window._markStatic3DDirty === 'function') window._markStatic3DDirty();
+    if (typeof _markAllDirty === 'function') _markAllDirty();
+    if (typeof threeScene !== 'undefined' && threeScene) {
+        if (typeof clear3DScene === 'function') clear3DScene();
+    }
 
     // 界面刷新
     syncLevelUI();

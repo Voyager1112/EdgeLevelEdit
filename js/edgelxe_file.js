@@ -399,14 +399,19 @@ async function loadXMLAndPNG(files) {
 
     function _finishImport() {
         state._suppressUndo = importPrevSuppressUndo;
-        // 导入会替换 state.xxx 的数组引用，旧撤销记录里的 array 引用已失效，
-        // 保留栈反而会在撤销时"改了个没人看的旧数组"，所以直接清空。
         state._undoStack = [];
         state._redoStack = [];
-        // 索引全量重建 + 全量标脏（数据全变了）
+
         if (typeof rebuildSpatialIndex === 'function') rebuildSpatialIndex();
+        if (typeof _recalcStaticCounts === 'function') _recalcStaticCounts();     // ★ 新增
         if (typeof _markAllDirty === 'function') _markAllDirty();
-        // 触发一次保存
+        if (typeof window._markStatic3DDirty === 'function') window._markStatic3DDirty();  // ★ 新增
+
+        // 3D 开着就立刻重绘
+        if (typeof threeScene !== 'undefined' && threeScene) {
+            if (typeof render3D === 'function') render3D();
+        }
+
         saveCache();
     }
 
@@ -1129,6 +1134,8 @@ async function loadXMLAndPNG(files) {
 						state.staticBlocks[layerNum] = layer;
 						loadedCount++;
 						if (loadedCount === totalLayers) {
+                            if (typeof _recalcStaticCounts === 'function') _recalcStaticCounts();
+                            if (typeof window._markStatic3DDirty === 'function') window._markStatic3DDirty();
 							requestRender();
 							updateStatus();
 							uniInterface();

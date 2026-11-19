@@ -632,6 +632,23 @@
                             });
                         }
                         resolve();
+                    } else if (name.endsWith('.xml')) {
+                        reader.onload = (e) => {
+                            setTimeout(() => {
+                                try {
+                                    const internalName = name.replace(/\.xml$/i, '');
+                                    const esoBuffer = generateESO(e.target.result, internalName);
+                                    currentESOData = parseESO(esoBuffer);
+                                    autoMatchTextures(currentESOData);
+                                    renderESO(currentESOData);
+                                } catch (err) {
+                                    alert("解析 XML 失败: " + err.message);
+                                } finally {
+                                    resolve();
+                                }
+                            }, 50);
+                        };
+                        reader.readAsText(file);
                     } else {
                         resolve();
                     }
@@ -641,6 +658,245 @@
             Promise.all(promises);
         }
 
+        function generateESO(xmlString, internalFileName) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(xmlString, 'text/xml');
+            const modelsNode = doc.querySelector('Models');
+            if (!modelsNode) throw new Error('未找到 <Models> 根节点');
+
+            const getAttr = (node, attr, defaultVal) => {
+                const val = node.getAttribute(attr);
+                return val !== null ? val : defaultVal;
+            };
+
+            const v01 = parseInt(getAttr(modelsNode, 'V01', '1'), 10);
+            const v02 = parseInt(getAttr(modelsNode, 'V02', '4096'), 10);
+            const nodeChild = getAttr(modelsNode, 'NodeChild', '0000000000000000');
+            const nodeSibling = getAttr(modelsNode, 'NodeSibling', '0000000000000000');
+            const v07 = parseInt(getAttr(modelsNode, 'V07', '0'), 10);
+            const v08 = parseInt(getAttr(modelsNode, 'V08', '0'), 10);
+            const v09 = parseInt(getAttr(modelsNode, 'V09', '0'), 10);
+            const scaleXYZ = parseFloat(getAttr(modelsNode, 'ScaleXYZ', '1'));
+            const translate = getAttr(modelsNode, 'Translate', '0,0,0');
+            const rotate = getAttr(modelsNode, 'Rotate', '0,0,0');
+            const scale = getAttr(modelsNode, 'Scale', '1,1,1');
+            const v20 = parseFloat(getAttr(modelsNode, 'V20', '0'));
+            const v21 = parseInt(getAttr(modelsNode, 'V21', '0'), 10);
+            const bMin = getAttr(modelsNode, 'BoundingMin', '0,0,0');
+            const bMax = getAttr(modelsNode, 'BoundingMax', '0,0,0');
+
+            const modelNodes = doc.querySelectorAll('Models > Model');
+            if (modelNodes.length === 0) throw new Error('没有找到任何 Model');
+
+            const modelsData = [];
+            for (const modelEl of modelNodes) {
+                const materialAsset = getAttr(modelEl, 'MaterialAsset', '0000000000000000');
+                const triangleNodes = modelEl.querySelectorAll('Triangle');
+                const vertices = [];
+                for (const tri of triangleNodes) {
+                    const vertNodes = tri.querySelectorAll('Vertex');
+                    if (vertNodes.length !== 3) continue;
+                    for (const vn of vertNodes) {
+                        const pos = getAttr(vn, 'Position', '0,0,0');
+                        const normal = getAttr(vn, 'Normal', '0,0,0');
+                        const color = getAttr(vn, 'Color', '');
+                        const texCoord = getAttr(vn, 'TexCoord', '0,0');
+                        const texCoord2 = getAttr(vn, 'TexCoord2', '0,0');
+                        vertices.push({ pos, normal, color, texCoord, texCoord2 });
+                    }
+                }
+                if (vertices.length === 0) continue;
+
+                let flags = 0;
+                const hasNormal = vertices.some(v => v.normal !== '0,0,0');
+                const hasColor = vertices.some(v => v.color !== '');
+                const hasTexCoord = vertices.some(v => v.texCoord !== '0,0');
+                const hasTexCoord2 = vertices.some(v => v.texCoord2 !== '0,0');
+                if (hasNormal) flags |= 1;
+                if (hasColor) flags |= 2;
+                if (hasTexCoord) flags |= 4;
+                if (hasTexCoord2) flags |= 8;
+
+                modelsData.push({
+                    materialAsset,
+                    flags,
+                    vertices,
+                    hasNormal,
+                    hasColor,
+                    hasTexCoord,
+                    hasTexCoord2
+                });
+            }
+            if (modelsData.length === 0) throw new Error('没有有效的顶点数据');
+
+            // 计算总大小
+            let totalSize = 136; // Asset header
+            let headerSize = 4 + 4 + 8 + 8 + 4 + 4 + 4 + 4 + 12 + 12 + 12 + 4 + 4 + 4;
+            if (modelsData.length > 0) headerSize += 24;
+            totalSize += headerSize;
+
+            for (const model of modelsData) {
+                const numVerts = model.vertices.length;
+                totalSize += 8 + 4 + 4 + 4 + 4; // MaterialAsset + flags + numVerts + numPolys + unknown
+                if (model.hasNormal) totalSize += numVerts * 12;
+                if (model.hasColor) totalSize += numVerts * 4;
+                if (model.hasTexCoord) totalSize += numVerts * 8;
+                if (model.hasTexCoord2) totalSize += numVerts * 8;
+                totalSize += numVerts * 12; // positions
+                totalSize += numVerts * 2; // indices
+            }
+            totalSize += 20; // footer
+
+            const buffer = new ArrayBuffer(totalSize);
+            const view = new DataView(buffer);
+            let pos = 0;
+
+            // ---- Asset Header ----
+            const low = 0x00000004;
+            const high = 0x00180000;
+            view.setUint32(pos, low, true);
+            view.setUint32(pos + 4, high, true);
+            pos += 8;
+
+            // 文件名 (64 bytes)
+            const enc = new TextEncoder();
+            const nameBytes = enc.encode(internalFileName || 'level');
+            for (let i = 0; i < 64; i++) {
+                view.setUint8(pos + i, i < nameBytes.length ? nameBytes[i] : 0);
+            }
+            pos += 64;
+
+            // 命名空间 (64 bytes)
+            const ns = 'models';
+            const nsBytes = enc.encode(ns);
+            for (let i = 0; i < 64; i++) {
+                view.setUint8(pos + i, i < nsBytes.length ? nsBytes[i] : 0);
+            }
+            pos += 64;
+
+            // ---- ESO Header ----
+            view.setInt32(pos, v01, true); pos += 4;
+            view.setInt32(pos, v02, true); pos += 4;
+            pos = writeAssetHash(view, pos, nodeChild);
+            pos = writeAssetHash(view, pos, nodeSibling);
+            view.setInt32(pos, v07, true); pos += 4;
+            view.setInt32(pos, v08, true); pos += 4;
+            view.setInt32(pos, v09, true); pos += 4;
+            view.setFloat32(pos, scaleXYZ, true); pos += 4;
+            pos = writeVec3(view, pos, translate);
+            pos = writeVec3(view, pos, rotate);
+            pos = writeVec3(view, pos, scale);
+            view.setFloat32(pos, v20, true); pos += 4;
+            view.setInt32(pos, v21, true); pos += 4;
+            view.setInt32(pos, modelsData.length, true); pos += 4;
+            if (modelsData.length > 0) {
+                pos = writeVec3(view, pos, bMin);
+                pos = writeVec3(view, pos, bMax);
+            }
+
+            // ---- Models ----
+            for (const model of modelsData) {
+                const numVerts = model.vertices.length;
+                const numPolys = Math.floor(numVerts / 3);
+                pos = writeAssetHash(view, pos, model.materialAsset);
+                view.setUint32(pos, model.flags, true); pos += 4;
+                view.setInt32(pos, numVerts, true); pos += 4;
+                view.setInt32(pos, numPolys, true); pos += 4;
+                view.setInt32(pos, 0, true); pos += 4;
+
+                for (const v of model.vertices) {
+                    pos = writeVec3(view, pos, v.pos);
+                }
+                if (model.hasNormal) {
+                    for (const v of model.vertices) {
+                        pos = writeVec3(view, pos, v.normal);
+                    }
+                }
+                if (model.hasColor) {
+                    for (const v of model.vertices) {
+                        let color = 0xFFFFFFFF;
+                        if (v.color && v.color !== '') {
+                            const hex = v.color.replace('#', '');
+                            if (hex.length === 6) color = 0xFF000000 + parseInt(hex, 16);
+                            else if (hex.length === 8) color = parseInt(hex, 16);
+                        }
+                        view.setUint32(pos, color, true); pos += 4;
+                    }
+                }
+                if (model.hasTexCoord) {
+                    for (const v of model.vertices) {
+                        pos = writeVec2(view, pos, v.texCoord);
+                    }
+                }
+                if (model.hasTexCoord2) {
+                    for (const v of model.vertices) {
+                        pos = writeVec2(view, pos, v.texCoord2);
+                    }
+                }
+                for (let i = 0; i < numVerts; i++) {
+                    view.setUint16(pos, i, true); pos += 2;
+                }
+            }
+
+            // ---- Footer ----
+            if (modelsData.length > 0) {
+                view.setUint32(pos, 1, true); pos += 4;
+                view.setFloat32(pos, 0, true); pos += 4;
+                view.setFloat32(pos, 0, true); pos += 4;
+                view.setInt32(pos, 0, true); pos += 4;
+                view.setInt32(pos, 0, true); pos += 4;
+            } else {
+                view.setUint32(pos, 0, true); pos += 4;
+            }
+
+            return buffer;
+        }
+
+        function writeAssetHash(view, offset, hashStr) {
+            const bytes = parseHexHash(hashStr);
+            for (let i = 0; i < 8; i++) {
+                view.setUint8(offset + i, bytes[i]);
+            }
+            return offset + 8;
+        }
+
+        function parseHexHash(hashStr) {
+            const bytes = new Uint8Array(8);
+            const hex = hashStr.replace(/\s/g, '');
+            const groups = [];
+            for (let i = 0; i < hex.length; i += 8) {
+                groups.push(hex.substr(i, 8));
+            }
+            let pos = 0;
+            for (let g of groups) {
+                const b = new Uint8Array(4);
+                for (let j = 0; j < 4; j++) {
+                    b[j] = parseInt(g.substr(j * 2, 2), 16);
+                }
+                b.reverse();
+                for (let j = 0; j < 4; j++) {
+                    bytes[pos + j] = b[j];
+                }
+                pos += 4;
+            }
+            return bytes;
+        }
+
+        function writeVec3(view, offset, vecStr) {
+            const parts = vecStr.split(',').map(Number);
+            view.setFloat32(offset, parts[0], true);
+            view.setFloat32(offset + 4, parts[1], true);
+            view.setFloat32(offset + 8, parts[2], true);
+            return offset + 12;
+        }
+
+        function writeVec2(view, offset, vecStr) {
+            const parts = vecStr.split(',').map(Number);
+            view.setFloat32(offset, parts[0], true);
+            view.setFloat32(offset + 4, parts[1], true);
+            return offset + 8;
+        }
+        
         // ================= UI 事件绑定 =================
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('file-input');
@@ -692,7 +948,7 @@
     <div id="sidebar-header">
         <h3 style="margin:0 0 10px 0;">EDGE 资源加载器</h3>
         <div id="drop-zone">
-            拖拽 .eso / .png 文件到这里<br>
+            拖拽 .eso / .xml / .png 文件到这里<br>
             <small>(可多选，自动匹配材质)</small>
         </div>
         <input type="file" id="file-input" multiple accept=".eso,.xml,.png,.jpg">

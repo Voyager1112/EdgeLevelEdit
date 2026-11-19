@@ -4,7 +4,7 @@ const CACHE_V3_META = 'edge_xml_editor_v3_meta';
 const CACHE_V3_LAYER = 'edge_xml_editor_v3_layer_';
 const CACHE_V3_ARR = 'edge_xml_editor_v3_';
 
-function saveCache() {
+/*function saveCache() {
   if (state._suppressUI || state._isLargeProject) return;
   if (state.settings.autoSave === false) { state._hasUnsavedChanges = true; return; }
   const interval = state.settings.autoSaveInterval || 0;
@@ -15,7 +15,26 @@ function saveCache() {
   } else {
     doRealSaveCache(); state._hasUnsavedChanges = false;
   }
+}*/
+
+function saveCache() {
+  if (state._suppressUI || state._isLargeProject) return;
+  if (state.settings.autoSave === false) { 
+      state._hasUnsavedChanges = true; 
+      return; 
+  }
+  const interval = state.settings.autoSaveInterval || 0;
+  // 即使是实时模式，也强制最小防抖200ms
+  const effectiveDelay = interval > 0 ? interval*1000 : 200;
+
+  if (_saveTimer) clearTimeout(_saveTimer);
+  state._hasUnsavedChanges = true;
+  _saveTimer = setTimeout(() => { 
+      doRealSaveCache(); 
+      state._hasUnsavedChanges = false; 
+  }, effectiveDelay);
 }
+
 
 function doRealSaveCache() {
   try {
@@ -57,18 +76,48 @@ function doRealSaveCache() {
         }
     }
 
-    // 各类型数组
+    // 各类型数组：拆成「索引 + 每项一个 key」，避免每次写整个数组
     const arrMap = {
-      moving: 'movingPlatforms', falling: 'fallingPlatforms', prism: 'prisms',
-      resizer: 'resizers', bumper: 'bumpers', checkpoint: 'checkpoints',
-      cameratrigger: 'cameraTriggers', button: 'buttons',
-      buttonSequence: 'buttonSequences', othercube: 'otherCubes',
-      darkcube: 'darkCubes', unknown: 'unknownElements'
+        moving: 'movingPlatforms', falling: 'fallingPlatforms', prism: 'prisms',
+        resizer: 'resizers', bumper: 'bumpers', checkpoint: 'checkpoints',
+        cameratrigger: 'cameraTriggers', button: 'buttons',
+        buttonSequence: 'buttonSequences', othercube: 'otherCubes',
+        darkcube: 'darkCubes', unknown: 'unknownElements'
     };
     for (const [dirtyName, stateKey] of Object.entries(arrMap)) {
-      if (dirty.has(dirtyName)) {
-        localStorage.setItem(CACHE_V3_ARR + dirtyName, JSON.stringify(state[stateKey]));
-      }
+        if (!dirty.has(dirtyName)) continue;
+        const arr = state[stateKey] || [];
+        const idsKey = CACHE_V3_ARR + dirtyName + '_ids';
+        const itemPrefix = CACHE_V3_ARR + dirtyName + '_';
+
+        // 1. 读上次存的 id 列表
+        let prevIds = [];
+        try {
+            const raw = localStorage.getItem(idsKey);
+            if (raw) prevIds = JSON.parse(raw) || [];
+        } catch (_) {}
+
+        const currIds = arr.map(x => x.id).filter(id => id !== undefined && id !== null);
+        const currIdSet = new Set(currIds);
+
+        // 2. 删除上次有、这次没有的项
+        for (const prevId of prevIds) {
+            if (!currIdSet.has(prevId)) {
+                localStorage.removeItem(itemPrefix + prevId);
+            }
+        }
+
+        // 3. 写每一项（没变的话 storage 层会直接 return，开销极小）
+        for (const item of arr) {
+            if (item.id === undefined || item.id === null) continue;
+            localStorage.setItem(itemPrefix + item.id, JSON.stringify(item));
+        }
+
+        // 4. 写 id 索引（很小）
+        localStorage.setItem(idsKey, JSON.stringify(currIds));
+
+        // 5. 迁移：删掉旧版整数组 key（如果还有）
+        localStorage.removeItem(CACHE_V3_ARR + dirtyName);
     }
     // saveCache 顺带把 rebuildSpatialIndex 摘掉（增量已维护）
   } catch (e) {
@@ -227,7 +276,14 @@ function _finishLoadCache() {
     
     if (typeof _syncToolbarCheckboxes === 'function') _syncToolbarCheckboxes();
     if (typeof syncVisibilityUI === 'function') syncVisibilityUI();
+    // ★ 数据全换了：3D 静态池化必须重建
+    if (typeof window._markStatic3DDirty === 'function') window._markStatic3DDirty();
+    if (typeof _markAllDirty === 'function') _markAllDirty();
 
+    // 如果 3D 正开着，立刻重绘一次
+    if (typeof threeScene !== 'undefined' && threeScene) {
+        if (typeof clear3DScene === 'function') clear3DScene();
+    }
     // ---- 项目同步 ----
     /*const pid = localStorage.getItem('edge_xml_editor_current_pid');
     if (pid && window.PM && window.PM.sync) {
@@ -300,6 +356,26 @@ function loadCache() {
                     darkcube: 'darkCubes', unknown: 'unknownElements'
                 };
                 for (const [dirtyName, stateKey] of Object.entries(arrMap)) {
+                    const idsKey = CACHE_V3_ARR + dirtyName + '_ids';
+                    const itemPrefix = CACHE_V3_ARR + dirtyName + '_';
+
+                    // ① 新格式：逐项
+                    const idsRaw = localStorage.getItem(idsKey);
+                    if (idsRaw !== null) {
+                        let ids = [];
+                        try { ids = JSON.parse(idsRaw) || []; } catch (_) {}
+                        const arr = [];
+                        for (const id of ids) {
+                            const itemRaw = localStorage.getItem(itemPrefix + id);
+                            if (itemRaw) {
+                                try { arr.push(JSON.parse(itemRaw)); } catch (_) {}
+                            }
+                        }
+                        state[stateKey] = arr;
+                        continue;
+                    }
+
+                    // ② 旧格式：整数组（首次加载旧缓存时走这里，下次保存会自动迁移到新格式）
                     const raw = localStorage.getItem(CACHE_V3_ARR + dirtyName);
                     if (raw !== null) {
                         try { state[stateKey] = JSON.parse(raw) || []; }

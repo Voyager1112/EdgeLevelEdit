@@ -980,7 +980,7 @@ function decompressDataFromStorage(data) {
     if (!data) return data;
 
     // ① 新调色板格式（放宽：只要有 staticBlocksPalette 就解压）
-    if (Array.isArray(data.staticBlocksPalette) && Array.isArray(data.staticBlocksData)) {
+    /*if (Array.isArray(data.staticBlocksPalette) && Array.isArray(data.staticBlocksData)) {
         const { w, l } = data.level.size;
         const staticBlocks = {};
         const palette = data.staticBlocksPalette;
@@ -1004,7 +1004,37 @@ function decompressDataFromStorage(data) {
         copy._cacheFormat = CACHE_FORMAT_VERSION;
         copy.staticBlocks = staticBlocks;
         return copy;
+    }*/
+
+// 分支：新调色板格式
+if (Array.isArray(data.staticBlocksPalette) && Array.isArray(data.staticBlocksData)) {
+    const { w, l, h } = data.level.size;
+    const staticBlocks = {};
+    const palette = data.staticBlocksPalette;
+    const entries = data.staticBlocksData;
+
+    // ✅【修复】预先把0~h‑1全部z初始化空层数组！！！
+    for(let z=0; z < h; z++){
+        staticBlocks[z] = Array.from({length: l}, ()=>Array(w).fill(null));
     }
+
+    for (let i = 0; i < entries.length; i += 4) {
+        const x = entries[i];
+        const y = entries[i + 1];
+        const z = entries[i + 2];
+        const color = palette[entries[i + 3]];
+        if (!color) continue;
+        // 现在staticBlocks[z]一定已经存在，直接赋值
+        staticBlocks[z][y][x] = { r: color[0], g: color[1], b: color[2] };
+    }
+
+    const copy = { ...data };
+    delete copy.staticBlocksPalette;
+    delete copy.staticBlocksData;
+    copy.staticBlocks = staticBlocks;
+    return copy;
+}
+
 
     // ② 兼容旧的稀疏格式（如果你以前存过的）
     if (Array.isArray(data.staticBlocksSparse)) {
