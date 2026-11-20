@@ -30,33 +30,59 @@ function init() {
             { id: 'CT1', x: 10, y: 15, z: 0, radiusX: 0, radiusY: 0, zoom: -1, angle: 22, fov: 22, startDelay: 0, duration: 0, singleUse: false, useAngle: true },
             { id: 'Btn1', x: 7, y: 2, z: 1, visible: true, disableCount: 0, mode: 'StayDown', movingPlatformID: '', affectMoving: '', affectBumpers: '', triggerAchievements: '', affectButtons: '' },
         ];
-        state.fallingPlatforms.push(demo[0]); state.prisms.push(demo[1]); state.resizers.push(demo[2]); state.resizers.push(demo[3]);
-        state.bumpers.push(demo[4]); state.checkpoints.push(demo[5]); state.cameraTriggers.push(demo[6]); state.buttons.push(demo[7]);
+        state.fallingPlatforms.push(demo[0]);
+        state.prisms.push(demo[1]);
+        state.resizers.push(demo[2]);
+        state.resizers.push(demo[3]);
+        state.bumpers.push(demo[4]);
+        state.checkpoints.push(demo[5]);
+        state.cameraTriggers.push(demo[6]);
+        state.buttons.push(demo[7]);
         state.nextIdCounter = 10;
-        
-        const layer0 = state.staticBlocks[0];
+
+        // ★ 修复：用 getOrCreateLayer 按需创建第 0 层，并做边界保护
+        const layer0 = getOrCreateLayer(0);
         if (layer0) {
-            for (let y = 2; y < 6; y++) for (let x = 2; x < 8; x++) layer0[y][x] = { r: 255, g: 255, b: 128 };
+            const maxY = Math.min(6, state.level.size.l);
+            const maxX = Math.min(8, state.level.size.w);
+            for (let y = 2; y < maxY; y++) {
+                for (let x = 2; x < maxX; x++) {
+                    if (layer0[y]) layer0[y][x] = { r: 255, g: 255, b: 128 };
+                }
+            }
         }
-        
-        _recalcStaticCounts();               // ★
-        syncLevelUI(); updateCanvasRangeFromSize(); updateLayerMax(); requestRender(); updatePanel(); updateElemList(); updateStatus();
+
+        _recalcStaticCounts();
+        syncLevelUI(); updateCanvasRangeFromSize(); updateLayerMax();
+        requestRender(); updatePanel(); updateElemList(); updateStatus();
         state._undoStack = []; state._redoStack = [];
+
+        // ★ 关键修复：标记所有数据为脏，让 saveCache 真的写入 v3 缓存
+        if (typeof _markAllDirty === 'function') _markAllDirty();
+
         if (typeof saveCache === 'function') saveCache();
+
         if (window.PM && typeof window.PM.createProject === 'function'
             && typeof window.PM.captureCurrentData === 'function') {
             try {
                 const data = window.PM.captureCurrentData();
                 if (data) {
-                    const pid = window.PM.createProject('Demo', data);
-                    window.PM.setCurrentProjectId(pid);
-                    if (typeof window.PM.sync === 'function') window.PM.sync();
+                    // ★ 防累积：如果已有当前项目 ID，直接同步，避免每次新建 Demo 项目
+                    const existingPid = typeof window.PM.getCurrentProjectId === 'function'
+                        ? window.PM.getCurrentProjectId() : null;
+                    if (existingPid) {
+                        if (typeof window.PM.sync === 'function') window.PM.sync();
+                    } else {
+                        const pid = window.PM.createProject('Demo', data);
+                        window.PM.setCurrentProjectId(pid);
+                        if (typeof window.PM.sync === 'function') window.PM.sync();
+                    }
                 }
             } catch (e) { console.error(e); }
         }
         showToast('已加载示例数据，并创建 Demo 项目');
     }
-    
+
 	if (hasCache) {
 		const { w, l, h } = state.level.size;
         for (const zKey in state.staticBlocks) {
@@ -1176,6 +1202,11 @@ B 通道（模型高度）
     })();
     
     if (window.QuickFill?.setOverwrite) window.QuickFill.setOverwrite(!!state.settings.pasteOverwrite);
+    
+    if (state.drawMode == 'brush') {
+    document.getElementById('toolSingle').classList.remove('active');
+    document.getElementById('toolBrush').classList.add('active');
+    }
     
     window.launchGame = function() {
         const exePath = state.settings.gamePath; if (!exePath) return alert('请先打开设置，选择游戏程序路径');

@@ -290,6 +290,14 @@ function switchProject(id) {
         state._suppressUndo = prevSuppressUndo;     // ★ 保证复位
     }
 
+    if (state.drawMode == 'brush') {
+    document.getElementById('toolSingle').classList.remove('active');
+    document.getElementById('toolBrush').classList.add('active');
+    } else {
+        document.getElementById('toolSingle').classList.add('active');
+        document.getElementById('toolBrush').classList.remove('active');
+    }
+
     if (typeof saveCache === 'function') saveCache();
 
     const store = loadProjectStore();

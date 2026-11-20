@@ -68,7 +68,7 @@ npm install
 npm start
 ```
 
-### 构建zip便携版
+### 构建压缩包(7z)便携版
 
 ```bash
 npm run build

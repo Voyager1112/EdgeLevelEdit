@@ -153,8 +153,8 @@ function renderGrid() {
         }
     }
 
-    // 7. 绘制网格线（单次 stroke，避免 200 次 draw call）
-    if (gridW <= 200 && gridH <= 200) {          // 太大就跳过，避免视觉噪音
+    // 7. 绘制网格线（单次 stroke，避免数百次 draw call）
+    if (gridW <= 500 && gridH <= 500) {          // 太大就跳过，避免视觉噪音
         ctx.save();
         ctx.strokeStyle = cssBgGrid;
         ctx.lineWidth = 0.8;

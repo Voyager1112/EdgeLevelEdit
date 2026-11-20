@@ -1,6 +1,6 @@
 {
   "name": "edge-level-editor",
-  "version": "1.6.8",
+  "version": "1.7.0",
   "description": "EDGE Level Editor",
   "main": "main.js",
   "scripts": {

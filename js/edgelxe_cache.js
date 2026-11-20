@@ -421,6 +421,7 @@ function saveSettingsOnly() {
     const raw = localStorage.getItem(CACHE_V3_META);
     const meta = raw ? JSON.parse(raw) : { _v: 3 };
     meta.settings = state.settings;
+    meta.drawMode = state.drawMode;//
     localStorage.setItem(CACHE_V3_META, JSON.stringify(meta));
   } catch (e) { console.warn('保存设置失败', e); }
 }

@@ -202,6 +202,7 @@ document.getElementById('toolSingle').addEventListener('click', function() {
 	state.drawMode = 'single';
 	this.classList.add('active');
 	document.getElementById('toolBrush').classList.remove('active');
+    saveSettingsOnly();
 	showToast('模式: 单点');
 });
 
@@ -209,6 +210,7 @@ document.getElementById('toolBrush').addEventListener('click', function() {
 	state.drawMode = 'brush';
 	this.classList.add('active');
 	document.getElementById('toolSingle').classList.remove('active');
+    saveSettingsOnly();
 	showToast('模式: 画笔');
 });
 
