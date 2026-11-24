@@ -13,6 +13,19 @@ function requestRender() {
 		});
 	}
 }
+// ============ 3D 渲染节流 ============
+let _render3DRAF = null;
+function request3DRender() {
+    if (!threeRenderer) return;
+    const view = document.getElementById('view3dContainer');
+    if (!view || !view.classList.contains('active')) return;
+    if (_render3DRAF) return;
+    _render3DRAF = requestAnimationFrame(() => {
+        _render3DRAF = null;
+        render3D();
+    });
+}
+window.request3DRender = request3DRender;
 const _cssVarCache = {};
 function getCSSVar(name) {
     if (_cssVarCache[name] !== undefined) return _cssVarCache[name];
@@ -51,7 +64,7 @@ function renderGrid() {
 
     const totalW = realMaxX - realMinX + 1;
     const totalH = realMaxY - realMinY + 1;
-    const threshold = state.settings.chunkThreshold || 500;
+    const threshold = state.settings.chunkThreshold || 100; // 启用分块阈值
     const chunkSize = state.settings.chunkSize || 100;
 
     let minX = realMinX, maxX = realMaxX;
@@ -264,24 +277,61 @@ function renderGrid() {
 // ==================== 新增：小地图渲染 ====================
 let _miniMapLastRender = 0;
 let _miniMapPending = false;
+// ============ 小地图位图缓存 ============
+let _miniMapBlockCache = null;       // 离屏 canvas，1:1 像素映射
+let _miniMapForceStale = true;       // 标记：下次 render 时要重建
+let _miniMapRAF = null;
 
-function renderMiniMap() {
-    const now = performance.now();
-    if (now - _miniMapLastRender < 200) {
-        if (_miniMapPending) return;
-        _miniMapPending = true;
-        setTimeout(() => {
-            _miniMapPending = false;
-            _miniMapLastRender = performance.now();
-            _doRenderMiniMap();
-        }, 200 - (now - _miniMapLastRender));
-        return;
+function _markMiniMapStale() { _miniMapForceStale = true; }
+window._markMiniMapStale = _markMiniMapStale;
+
+function _buildMiniMapBlockCache() {
+    const range = state.canvasRange;
+    const globalW = Math.max(1, range.maxX - range.minX + 1);
+    const globalH = Math.max(1, range.maxY - range.minY + 1);
+    const c = document.createElement('canvas');
+    c.width = globalW;
+    c.height = globalH;
+    const cctx = c.getContext('2d');
+    cctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+
+    const counts = state._staticCounts || {};
+    for (let z in state.staticBlocks) {
+        if (!counts[z]) continue;
+        const layer = state.staticBlocks[z];
+        if (!layer) continue;
+        for (let y = 0; y < layer.length; y++) {
+            const row = layer[y];
+            if (!row) continue;
+            const ry = y - range.minY;
+            if (ry < 0 || ry >= globalH) continue;
+            for (let x = 0; x < row.length; x++) {
+                if (row[x]) {
+                    const rx = x - range.minX;
+                    if (rx >= 0 && rx < globalW) cctx.fillRect(rx, ry, 1, 1);
+                }
+            }
+        }
     }
-    _miniMapLastRender = now;
-    _doRenderMiniMap();
+    return c;
 }
 
-function _doRenderMiniMap() {
+// 只重绘小地图，不动主画布
+function requestMiniMapRender(immediate = false) {
+    if (immediate) {
+        if (_miniMapRAF) { cancelAnimationFrame(_miniMapRAF); _miniMapRAF = null; }
+        renderMiniMap();
+        return;
+    }
+    if (_miniMapRAF) return;
+    _miniMapRAF = requestAnimationFrame(() => {
+        _miniMapRAF = null;
+        renderMiniMap();
+    });
+}
+window.requestMiniMapRender = requestMiniMapRender;
+
+function renderMiniMap() {
     const cvs = document.getElementById('miniMapCanvas');
     if (!cvs) return;
     const ctx = cvs.getContext('2d');
@@ -291,6 +341,11 @@ function _doRenderMiniMap() {
     const range = state.canvasRange;
     const globalW = Math.max(1, range.maxX - range.minX + 1);
     const globalH = Math.max(1, range.maxY - range.minY + 1);
+    // 缓存构建（只在 ForceStale 时）
+    if (_miniMapForceStale || !_miniMapBlockCache) {
+        _miniMapBlockCache = _buildMiniMapBlockCache();
+        _miniMapForceStale = false;
+    }
     const zoom = state.settings.miniMapZoom || 1;
     const panX = state.settings.miniMapPanX || 0;
     const panY = state.settings.miniMapPanY || 0;
@@ -298,40 +353,16 @@ function _doRenderMiniMap() {
     const offsetX = (W - globalW * scale) / 2 + panX;
     const offsetY = (H - globalH * scale) / 2 + panY;
 
-    // ★ 空层跳过（利用 _staticCounts）
-    const counts = state._staticCounts || {};
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    for (let z in state.staticBlocks) {
-        if (!counts[z]) continue;           // 该层 0 个方块，直接跳过
-        const layer = state.staticBlocks[z];
-        if (!layer) continue;
-        for (let y = 0; y < layer.length; y++) {
-            const row = layer[y];
-            if (!row) continue;
-            for (let x = 0; x < row.length; x++) {
-                if (row[x]) {
-                    const px = offsetX + (x - range.minX) * scale;
-                    const py = offsetY + (y - range.minY) * scale;
-                    ctx.fillRect(px, py, Math.max(1, scale), Math.max(1, scale));
-                }
-            }
-        }
-    }
 
-    // 绘制所有方块缩略图 (白色)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    for (let z in state.staticBlocks) {
-        const layer = state.staticBlocks[z];
-        if (!layer) continue;
-        for (let y = 0; y < layer.length; y++) {
-            for (let x = 0; x < layer[y].length; x++) {
-                if (layer[y][x]) {
-                    const px = offsetX + (x - range.minX) * scale;
-                    const py = offsetY + (y - range.minY) * scale;
-                    ctx.fillRect(px, py, Math.max(1, scale), Math.max(1, scale));
-                }
-            }
-        }
+
+// ★ 方块层：drawImage 一次
+    if (_miniMapBlockCache) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(
+            _miniMapBlockCache,
+            0, 0, globalW, globalH,
+            offsetX, offsetY, globalW * scale, globalH * scale
+        );
     }
 
     // 绘制所有元素缩略图 (橙色)
@@ -348,7 +379,7 @@ function _doRenderMiniMap() {
     // 绘制当前区块红框
     const totalW = range.maxX - range.minX + 1;
     const totalH = range.maxY - range.minY + 1;
-    const threshold = state.settings.chunkThreshold || 500;
+    const threshold = state.settings.chunkThreshold || 100; // 启用分块阈值
     
     if (totalW > threshold || totalH > threshold) {
         const chunkSize = state.settings.chunkSize || 100;
@@ -582,6 +613,14 @@ function updatePixelAt(x, y, z) {
     ctx.lineWidth = 0.8;
     ctx.strokeRect(px, py, pixelSize, pixelSize);
     ctx.restore();
+    // ★ 3D 同步
+    if (state._brushSessionActive || state._addSessionActive) {
+        // 画笔/长按连续操作中：不每格重建 InstancedMesh，等松手统一刷
+        window._pending3DRefresh = true;
+    } else {
+        // 单次点击：立即刷新
+        request3DRender();
+    }
 }
 
 // ==================== 路点渲染 ====================

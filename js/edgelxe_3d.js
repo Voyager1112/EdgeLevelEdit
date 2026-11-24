@@ -118,9 +118,11 @@ function initThree() {
 	// 启动动画循环
 	animate3D();
 }
-
+let _threeViewEl = null;
 function animate3D() {
     requestAnimationFrame(animate3D);
+    if (!_threeViewEl) _threeViewEl = document.getElementById('view3dContainer');
+    if (!_threeViewEl || !_threeViewEl.classList.contains('active')) return;
     // 键盘移动（仅在非预览模式？或任何模式都可）
     const speed = 0.1;
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(threeCamera.quaternion);
@@ -1387,6 +1389,7 @@ function show3D() {
 		}
 		resizeThreeRenderer();
 		render3D();
+        if (typeof _positionMiniMapToCanvasWrap === 'function') _positionMiniMapToCanvasWrap();
 	}, 150);
 }
 
@@ -1399,6 +1402,7 @@ function hide3D() {
 	setTimeout(() => {
 		resizeThreeRenderer();
 		render3D();
+        if (typeof _positionMiniMapToCanvasWrap === 'function') _positionMiniMapToCanvasWrap();
 	}, 100);
 }
 

@@ -4,19 +4,6 @@ const CACHE_V3_META = 'edge_xml_editor_v3_meta';
 const CACHE_V3_LAYER = 'edge_xml_editor_v3_layer_';
 const CACHE_V3_ARR = 'edge_xml_editor_v3_';
 
-/*function saveCache() {
-  if (state._suppressUI || state._isLargeProject) return;
-  if (state.settings.autoSave === false) { state._hasUnsavedChanges = true; return; }
-  const interval = state.settings.autoSaveInterval || 0;
-  if (interval > 0) {
-    if (_saveTimer) clearTimeout(_saveTimer);
-    state._hasUnsavedChanges = true;
-    _saveTimer = setTimeout(() => { doRealSaveCache(); state._hasUnsavedChanges = false; }, interval * 1000);
-  } else {
-    doRealSaveCache(); state._hasUnsavedChanges = false;
-  }
-}*/
-
 function saveCache() {
   if (state._suppressUI || state._isLargeProject) return;
   if (state.settings.autoSave === false) { 
@@ -284,11 +271,7 @@ function _finishLoadCache() {
     if (typeof threeScene !== 'undefined' && threeScene) {
         if (typeof clear3DScene === 'function') clear3DScene();
     }
-    // ---- 项目同步 ----
-    /*const pid = localStorage.getItem('edge_xml_editor_current_pid');
-    if (pid && window.PM && window.PM.sync) {
-        setTimeout(() => { window.PM.sync(); }, 1000);
-    }*/
+    _markMiniMapStale();
 }
 
 function loadCache() {

@@ -227,103 +227,6 @@ document.getElementById('close3dBtn').addEventListener('click', function() {
 window.addEventListener('resize', onResize3D);
 
 
-/*function newProject() {
-    // ★ 退出大项目模式
-    state._isLargeProject = false;
-    const warn = document.getElementById('largeProjectWarning');
-    if (warn) warn.remove();
-	// 检查是否有数据（静态块或元素）
-	let hasData = false;
-	for (const z in state.staticBlocks) {
-		const layer = state.staticBlocks[z];
-		for (let y = 0; y < layer.length; y++) {
-			for (let x = 0; x < layer[y].length; x++) {
-				if (layer[y][x]) { hasData = true; break; }
-			}
-			if (hasData) break;
-		}
-		if (hasData) break;
-	}
-	if (!hasData) {
-		// 检查其他元素
-		hasData = state.movingPlatforms.length > 0 || state.fallingPlatforms.length > 0 ||
-				  state.prisms.length > 0 || state.resizers.length > 0 ||
-				  state.bumpers.length > 0 || state.checkpoints.length > 0 ||
-				  state.cameraTriggers.length > 0 || state.buttons.length > 0 ||
-				  state.buttonSequences.length > 0 || state.otherCubes.length > 0 ||
-				  state.darkCubes.length > 0;
-	}
-
-	// 重置所有数据
-	const { w, l, h } = state.level.size;
-	// 重置静态块（全空）
-	const newStatic = {};
-	for (let z = 0; z < h; z++) {
-		newStatic[z] = Array.from({ length: l }, () => Array(w).fill(null));
-	}
-	state.staticBlocks = newStatic;
-    state._staticCounts = {};
-
-	// 重置所有元素数组
-	state.movingPlatforms = [];
-	state.fallingPlatforms = [];
-	state.prisms = [];
-	state.resizers = [];
-	state.bumpers = [];
-	state.checkpoints = [];
-	state.cameraTriggers = [];
-	state.buttons = [];
-	state.buttonSequences = [];
-	state.otherCubes = [];
-	state.darkCubes = [];
-	state.unknownElements = [];
-	state.nextIdCounter = 1;
-	state._idCounters = {};  // ← 添加这行
-	state.selectedElement = null;
-
-	// 重置 level 为默认值（但保留当前尺寸？此处重置为默认 10x10x3）
-	state.level = {
-		id: '10001',
-		name: 'MyLevel',
-		timeThresholds: [9, 25, 55, 85, 145],
-		size: { w: 10, l: 10, h: 3 },
-		spawn: { x: 3, y: 5, z: 1 },
-		exit: { x: 7, y: 5, z: 1 },
-		theme: 0,
-		musicJava: 0,
-		music: 6,
-		zoom: -1,
-		angle: 22,
-		fov: 22,
-		modelTheme: 0
-	};
-
-	state.currentLayer = 0;
-	layerInput.value = 0;
-	
-	// ---- 清理3D场景 ----
-    if (threeScene) {
-        clear3DScene();
-    }
-    state.highlightedMesh = null;
-    state.selected3D = null;
-    state.selectedElement = null;
-
-    // ★ 重置撤销历史
-    state._undoStack = [];
-    state._redoStack = [];
-
-	_markAllDirty();
-    syncLevelUI();
-	updateLayerMax();
-	requestRender();
-	updatePanel();
-	updateElemList();
-	refreshUnifiedBaseList();
-	updateStatus();
-	uniInterface();
-	showToast('已新建空项目');
-}*/
 
 function newProject() {
     state._isLargeProject = false;
@@ -445,7 +348,7 @@ function newProject() {
     // ★ 9. 同步复选框 UI
     if (typeof syncVisibilityUI === 'function') syncVisibilityUI();
     if (typeof _syncToolbarCheckboxes === 'function') _syncToolbarCheckboxes();
-
+    _markMiniMapStale();
     showToast('已新建空项目');
 }
 

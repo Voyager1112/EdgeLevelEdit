@@ -411,7 +411,7 @@ async function loadXMLAndPNG(files) {
         if (typeof threeScene !== 'undefined' && threeScene) {
             if (typeof render3D === 'function') render3D();
         }
-
+    _markMiniMapStale();
         saveCache();
     }
 

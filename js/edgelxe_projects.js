@@ -207,6 +207,7 @@ function restoreData(data) {
     }
 
     // 界面刷新
+    _markMiniMapStale();
     syncLevelUI();
     requestRender();
     updatePanel();
@@ -444,7 +445,7 @@ function renderProjectList() {
 }
 
 function openProjectManager() {
-    if (window.PM && window.PM.sync) window.PM.sync();
+    //if (window.PM && window.PM.sync) window.PM.sync();
 
     let dlg = document.getElementById('projectManagerDialog');
     if (!dlg) {

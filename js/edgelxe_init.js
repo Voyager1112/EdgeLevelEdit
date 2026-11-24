@@ -11,7 +11,7 @@ function init() {
     // ★ 核心修复：确保旧缓存加载后，分块属性存在
     if (!state.currentChunk) state.currentChunk = { x: 0, y: 0 };
     if (!state.settings.chunkSize) state.settings.chunkSize = 100;
-    if (!state.settings.chunkThreshold) state.settings.chunkThreshold = 500;
+    if (!state.settings.chunkThreshold) state.settings.chunkThreshold = 100;
 
 	if (state.staticColor) {
 		const colorPicker = document.getElementById('staticColorPicker');
@@ -80,6 +80,7 @@ function init() {
                 }
             } catch (e) { console.error(e); }
         }
+        _markMiniMapStale();
         showToast('已加载示例数据，并创建 Demo 项目');
     }
 
@@ -176,6 +177,26 @@ function init() {
 	});
 	setZoom(65);
 
+    function clampChunk(cx, cy) {
+        const range = state.canvasRange;
+        const chunkSize = state.settings.chunkSize || 100;
+
+        let minCX = Math.floor(range.minX / chunkSize);
+        let maxCX = Math.floor(range.maxX / chunkSize);
+        let minCY = Math.floor(range.minY / chunkSize);
+        let maxCY = Math.floor(range.maxY / chunkSize);
+
+        // 允许 chunk 右下角超出 range，但不允许整个 chunk 完全在 range 外
+        // minCX/maxCX 已经满足"chunk 起点在 range 内"，不需要额外处理
+        // 如果 rangeW <= chunkSize，minCX == maxCX 自动正确
+
+        return {
+            x: Math.max(minCX, Math.min(maxCX, cx)),
+            y: Math.max(minCY, Math.min(maxCY, cy)),
+            clamped: false  // 由 caller 判断
+        };
+    }
+
     // 键盘
     document.addEventListener('keydown', function(e) {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
@@ -197,7 +218,16 @@ function init() {
             if (e.key === 'ArrowRight') { state.currentChunk.x++; moved = true; }
             if (e.key === 'ArrowUp') { state.currentChunk.y--; moved = true; }
             if (e.key === 'ArrowDown') { state.currentChunk.y++; moved = true; }
-            if (moved) { e.preventDefault(); requestRender(); }
+            if (moved) {
+                e.preventDefault();
+                // 边界限制
+                if (typeof clampChunk === 'function') {
+                    const c = clampChunk(state.currentChunk.x, state.currentChunk.y);
+                    state.currentChunk.x = c.x;
+                    state.currentChunk.y = c.y;
+                }
+                requestRender();
+            }
         }
     });
 
@@ -781,6 +811,11 @@ B 通道（模型高度）
             window._elemListDirty = false;
             if (typeof updateElemList === 'function') updateElemList();
         }
+        // ★ session 结束时统一刷 3D
+        if (window._pending3DRefresh) {
+            window._pending3DRefresh = false;
+            request3DRender();
+        }
     }
     canvas.addEventListener('mouseup', handleCanvasLeave);
     canvas.addEventListener('mouseleave', handleCanvasLeave);
@@ -837,10 +872,10 @@ B 通道（模型高度）
             div.style = 'padding-top: 8px; margin-top: 8px; display: flex; gap: 16px; flex-wrap: wrap;';
             div.innerHTML = `
                 <label class="chk">开启分块阈值：
-                    <input type="number" id="settingChunkThreshold" min="100" max="10000" value="500" style="width:70px;"> 格
+                    <input type="number" id="settingChunkThreshold" min="1" max="10000" value="100" style="width:70px;"> 格
                 </label>
                 <label class="chk">区块大小：
-                    <input type="number" id="settingChunkSize" min="20" max="500" value="100" style="width:70px;"> 格
+                    <input type="number" id="settingChunkSize" min="1" max="1000" value="100" style="width:70px;"> 格
                 </label>
             `;
             
@@ -853,11 +888,11 @@ B 通道（模型高度）
             }
 
             document.getElementById('settingChunkThreshold').addEventListener('change', function() {
-                let v = Math.max(100, parseInt(this.value) || 500); state.settings.chunkThreshold = v; this.value = v;
+                let v = Math.max(1, parseInt(this.value) || 100); state.settings.chunkThreshold = v; this.value = v;
                 saveSettingsOnly(); updateCanvasRangeFromSize(); requestRender();
             });
             document.getElementById('settingChunkSize').addEventListener('change', function() {
-                let v = Math.max(20, parseInt(this.value) || 100); state.settings.chunkSize = v; this.value = v;
+                let v = Math.max(1, parseInt(this.value) || 100); state.settings.chunkSize = v; this.value = v;
                 state.currentChunk = { x: 0, y: 0 }; saveSettingsOnly(); updateCanvasRangeFromSize(); requestRender();
             });
         }
@@ -885,7 +920,7 @@ B 通道（模型高度）
             
             const dirInput = document.getElementById('settingExportDir'); const dirBtn = document.getElementById('settingExportDirBtn');
             if (dirInput && dirBtn) { dirInput.disabled = !state.settings.useCustomExportDir; dirBtn.disabled = !state.settings.useCustomExportDir; }
-            safeVal('settingChunkThreshold', state.settings.chunkThreshold || 500);
+            safeVal('settingChunkThreshold', state.settings.chunkThreshold || 100);
             safeVal('settingChunkSize', state.settings.chunkSize || 100);
             toggleAutoSaveUI();
         }
@@ -932,11 +967,9 @@ B 通道（模型高度）
     // ★ 动态注入小地图
     (function initMiniMap() {
         if (!document.getElementById('miniMapPanel')) {
-            const defaultLeft = window.innerWidth - 500;
-            const defaultTop = window.innerHeight - 250;
             
             document.body.insertAdjacentHTML('beforeend', `
-                <div id="miniMapPanel" style="position: fixed; left: ${defaultLeft}px; top: ${defaultTop}px; background: var(--bg-panel); border: 1px solid var(--border-strong); box-shadow: var(--shadow-modal); z-index: 999; display: flex; flex-direction: column; touch-action: none;">
+                <div id="miniMapPanel" style="position: fixed; left: 0; top: 0; background: var(--bg-panel); border: 1px solid var(--border-strong); box-shadow: var(--shadow-modal); z-index: 999; display: flex; flex-direction: column; touch-action: none;">
                     <div id="miniMapHeader" style="padding: 4px 8px; background: var(--bg-toolbar); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; cursor: move;">
                         <span style="font-size: 11px; font-weight: bold; color: var(--text-dim);">🗺️ 小地图</span>
                         <span style="font-size: 10px; color: var(--text-faint); cursor:pointer;" onclick="document.getElementById('miniMapBody').style.display = document.getElementById('miniMapBody').style.display === 'none' ? 'flex' : 'none';">折叠</span>
@@ -944,12 +977,12 @@ B 通道（模型高度）
                     <div id="miniMapBody" style="padding: 8px; display: flex; flex-direction: column; gap: 8px;">
                         <canvas id="miniMapCanvas" width="150" height="150" style="background: #0a0a1a; cursor: crosshair; border: 1px solid var(--border); touch-action: none;"></canvas>
                         
-                        <!-- ★ 新增：控制栏 -->
+                        <!-- 控制栏 -->
                         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-dim);">
                             <div style="display:flex; align-items:center; gap:4px;">
                                 倍数:<input type="number" id="miniMapZoomInput" value="${state.settings.miniMapZoom || 1}" min="0.1" max="50" step="0.1" style="width:45px; height:18px; padding:0 2px; font-size:11px;">
                             </div>
-                            <button id="miniMapLocateBtn" class="btn-sm" style="height:20px; padding:0 6px;">📍 定位红框</button>
+                            <button id="miniMapLocateBtn" class="btn-sm" style="height:20px; padding:0 6px;">🎯 定位红框</button>
                         </div>
                         
                         <div style="font-size:10px; color:var(--text-faint); text-align:center;">左键切块 | 右键平移</div>
@@ -962,7 +995,34 @@ B 通道（模型高度）
                     </div>
                 </div>
             `);
+            function _positionMiniMapToCanvasWrap() {
+                const panel = document.getElementById('miniMapPanel');
+                const wrap = document.getElementById('canvasWrap');
+                if (!panel || !wrap) return;
+                if (panel.dataset.userMoved === '1') return;   // 用户拖过就不自动定位
 
+                const panelRect = panel.getBoundingClientRect();
+                const wrapRect = wrap.getBoundingClientRect();
+                const padding = 12;
+                const left = wrapRect.right - panelRect.width - padding;
+                const top = wrapRect.bottom - panelRect.height - padding;
+                panel.style.left = Math.max(0, left) + 'px';
+                panel.style.top = Math.max(0, top) + 'px';
+            }
+            window._positionMiniMapToCanvasWrap = _positionMiniMapToCanvasWrap;
+
+            // 初始化后定位
+            requestAnimationFrame(_positionMiniMapToCanvasWrap);
+
+            // 尺寸变化自动重新定位（折叠/展开也会触发）
+            if (typeof ResizeObserver !== 'undefined') {
+                new ResizeObserver(() => _positionMiniMapToCanvasWrap())
+                    .observe(document.getElementById('miniMapPanel'));
+            }
+            window.addEventListener('resize', () => {
+                if (typeof _positionMiniMapToCanvasWrap === 'function') _positionMiniMapToCanvasWrap();
+            });
+            
             document.getElementById('miniMapAutoJump').addEventListener('change', function() {
                 state.settings.autoJumpChunk = this.checked;
                 saveSettingsOnly();
@@ -979,6 +1039,7 @@ B 通道（模型高度）
 
             header.addEventListener('pointerdown', (e) => {
                 if (e.target.tagName === 'SPAN' && e.target.textContent === '折叠') return;
+                panel.dataset.userMoved = '1';
                 isDraggingPanel = true;
                 pStartX = e.clientX; pStartY = e.clientY;
                 pStartLeft = parseInt(panel.style.left) || 0;
@@ -1008,8 +1069,9 @@ B 通道（模型高度）
                 state.settings.miniMapPanX = 0;
                 state.settings.miniMapPanY = 0;
                 saveSettingsOnly();
-                requestRender();
+                requestMiniMapRender();
             });
+
 
             // ★ 定位红框按钮（改为让小地图以红框为中心显示）
             document.getElementById('miniMapLocateBtn').addEventListener('click', () => {
@@ -1036,7 +1098,7 @@ B 通道（模型高度）
                 state.settings.miniMapPanY = (mapCenterY - cy) * scale;
 
                 saveSettingsOnly();
-                requestRender();
+                requestMiniMapRender();
             });
 
             // 小地图交互（左键切块，右键平移，滚轮以鼠标为中心缩放）
@@ -1059,7 +1121,7 @@ B 通道（模型高度）
                 } else if (e.button === 0) {
                     isDraggingChunk = true;
                     miniMapCanvas.setPointerCapture(e.pointerId);
-                    handleChunkClick(e);
+                    handleChunkClick(e, false);
                 }
             });
             
@@ -1116,8 +1178,9 @@ B 通道（模型高度）
                 state.settings.miniMapPanY = panY;
                 document.getElementById('miniMapZoomInput').value = newZoom.toFixed(1);
                 
-                saveSettingsOnly();
-                requestRender();
+                requestMiniMapRender();
+                clearTimeout(window._miniMapSaveTimer);
+                window._miniMapSaveTimer = setTimeout(saveSettingsOnly, 300);   // 延迟保存
             }, { passive: false });
             
             window.addEventListener('pointermove', (e) => {
@@ -1126,58 +1189,72 @@ B 通道（模型高度）
                     const dy = e.clientY - panStartY;
                     state.settings.miniMapPanX = initialPanX + dx;
                     state.settings.miniMapPanY = initialPanY + dy;
-                    requestRender();
+                    requestMiniMapRender();
                 } else if (isDraggingChunk) {
-                    handleChunkClick(e);
+                    handleChunkClick(e, false);
                 }
             });
             
             window.addEventListener('pointerup', (e) => {
                 if (isPanningMap) {
                     isPanningMap = false;
+                    saveSettingsOnly();
                     if (miniMapCanvas.hasPointerCapture(e.pointerId)) miniMapCanvas.releasePointerCapture(e.pointerId);
                 }
                 if (isDraggingChunk) {
                     isDraggingChunk = false;
+                    handleChunkClick(e, true);
+                    saveSettingsOnly();
                     if (miniMapCanvas.hasPointerCapture(e.pointerId)) miniMapCanvas.releasePointerCapture(e.pointerId);
                 }
             });
 
-            function handleChunkClick(e) {
+            let _chunkRenderTimer = null;
+
+            function handleChunkClick(e, finalize = false) {
                 const rect = miniMapCanvas.getBoundingClientRect();
                 const W = miniMapCanvas.width, H = miniMapCanvas.height;
                 const range = state.canvasRange;
-                
                 const globalW = Math.max(1, range.maxX - range.minX + 1);
                 const globalH = Math.max(1, range.maxY - range.minY + 1);
-                
                 const zoom = state.settings.miniMapZoom || 1;
                 const panX = state.settings.miniMapPanX || 0;
                 const panY = state.settings.miniMapPanY || 0;
-                
                 const scale = Math.min(W / globalW, H / globalH) * zoom;
                 const offsetX = (W - globalW * scale) / 2 + panX;
                 const offsetY = (H - globalH * scale) / 2 + panY;
 
-                let clickX = (e.clientX - rect.left) * (W / rect.width);
-                let clickY = (e.clientY - rect.top) * (H / rect.height);
+                const clickX = (e.clientX - rect.left) * (W / rect.width);
+                const clickY = (e.clientY - rect.top) * (H / rect.height);
 
                 let realX = Math.floor((clickX - offsetX) / scale) + range.minX;
                 let realY = Math.floor((clickY - offsetY) / scale) + range.minY;
-
                 realX = Math.max(range.minX, Math.min(range.maxX, realX));
                 realY = Math.max(range.minY, Math.min(range.maxY, realY));
 
                 const chunkSize = state.settings.chunkSize || 100;
                 if (!state.currentChunk) state.currentChunk = { x: 0, y: 0 };
-                
                 const newCX = Math.floor(realX / chunkSize);
                 const newCY = Math.floor(realY / chunkSize);
-                
-                if (newCX !== state.currentChunk.x || newCY !== state.currentChunk.y) {
-                    state.currentChunk.x = newCX;
-                    state.currentChunk.y = newCY;
-                    requestRender();
+
+                // ★ 边界限制
+                const oldX = state.currentChunk.x, oldY = state.currentChunk.y;
+                const c = (typeof clampChunk === 'function') ? clampChunk(newCX, newCY) : { x: newCX, y: newCY };
+
+                if (c.x !== oldX || c.y !== oldY) {
+                    state.currentChunk.x = c.x;
+                    state.currentChunk.y = c.y;
+                    requestMiniMapRender();                     // ★ 只重绘小地图（红框）
+                    if (finalize) {
+                        if (_chunkRenderTimer) { clearTimeout(_chunkRenderTimer); _chunkRenderTimer = null; }
+                        requestRender();                        // ★ 松手才重绘主画布
+                    } else {
+                        if (_chunkRenderTimer) return;
+                        _chunkRenderTimer = setTimeout(() => {
+                            _chunkRenderTimer = null;
+                            requestRender();                    // 拖动中每 100ms 合并一次
+                        }, 100);
+                    }
                 }
             }
         }
